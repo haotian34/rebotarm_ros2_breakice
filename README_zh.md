@@ -33,10 +33,10 @@
 
 | 新增内容 | 说明 |
 |---|---|
-| `rebotarm_dance` | 机械臂舞蹈动作节点 |
-| `rebotarm_greeting` | 打招呼动作节点 |
-| `rebotarm_gesture_actions` | 手势动作 |
-| `rebotarm_vision` | 视觉相关功能 |
+| `rebotarm_greeting` | 打招呼演示：三位置点头，topic 触发（见[演示项目](#演示项目)） |
+| `rebotarm_dance` | 跳舞演示：约 38s 舞蹈，轨迹离线预计算（见[演示项目](#演示项目)） |
+| `rebotarm_vision` | 手势识别：摄像头 + MediaPipe，发布 `/rebotarm/gesture_cmd` |
+| `rebotarm_gesture_actions` | 手势触发的 TCP 轨迹动作（石头 / 布 / 比心） |
 | `fake_dm_bringup.launch.py` | DM 版仿真启动（无真机也可运行） |
 
 ### 安装方式
@@ -63,6 +63,14 @@
    ros2 launch rebotarm_bringup fake_dm_bringup.launch.py
    ```
 
+4. **手势识别依赖**（可选，仅视觉演示需要）：
+
+   ```bash
+   pip install --user --break-system-packages "mediapipe==0.10.14" "numpy==1.26.4"
+   ```
+
+   `numpy` 必须保持 <2，否则会破坏 ROS2/pinocchio。
+
 其余使用方法与官方版本一致，详见下文。
 
 ---
@@ -75,7 +83,7 @@
 `reBotArm_control_py` Python 控制库封装为 ROS2 topic、service 和 action，
 作为二次开发、上层规划、可视化、重力补偿和单电机调试的统一入口。
 
-当前工作空间包含五个 ROS2 包：
+当前工作空间包含五个核心 ROS2 包：
 
 | 包 | 作用 |
 |---|---|
@@ -84,6 +92,15 @@
 | `rebotarm_bringup` | launch、配置、URDF、RViz 等启动资源 |
 | `rebotarm_moveit_config` | MoveIt 2 配置、SRDF、ros2_control、RViz 配置 |
 | `rebotarm_moveit_demos` | MoveIt 2 应用示例，如抓取放置和矩形轨迹 |
+
+以及四个演示应用包（见[演示项目](#演示项目)）：
+
+| 包 | 作用 |
+|---|---|
+| `rebotarm_greeting` | topic 触发的三位置点头问候 |
+| `rebotarm_dance` | 舞蹈表演，关节轨迹离线预计算 |
+| `rebotarm_vision` | 基于 MediaPipe 的手势识别（石头 / 布 / 比心） |
+| `rebotarm_gesture_actions` | 手势到轨迹的分发与回放 |
 
 ---
 
@@ -105,6 +122,7 @@
 | 机械臂 | reBot Arm B601 DM 或 RS |
 | 通信接口 | DM：USB 串口桥；RS：SocketCAN |
 | 主机 | Ubuntu 22.04+，ROS2，Python 3.10+ |
+| 摄像头 | USB 摄像头（仅手势识别演示需要） |
 
 接线说明：
 
@@ -225,10 +243,26 @@ rebotarm_ros2/
     ├── rebotarm_moveit_config/
     │   ├── config/
     │   └── launch/
-    └── rebotarm_moveit_demos/
-        ├── config/
+    ├── rebotarm_moveit_demos/
+    │   ├── config/
+    │   ├── launch/
+    │   └── rebotarm_moveit_demos/
+    ├── rebotarm_greeting/
+    │   ├── config/
+    │   ├── launch/
+    │   └── rebotarm_greeting/
+    ├── rebotarm_dance/
+    │   ├── config/
+    │   ├── launch/
+    │   └── rebotarm_dance/
+    ├── rebotarm_gesture_actions/
+    │   ├── config/
+    │   ├── launch/
+    │   └── rebotarm_gesture_actions/
+    └── rebotarm_vision/
         ├── launch/
-        └── rebotarm_moveit_demos/
+        ├── scripts/
+        └── rebotarm_vision/
 ```
 
 ---
@@ -641,6 +675,91 @@ src/rebotarm_moveit_demos/config/pick_place_rs.yaml
 | `rebotarm_moveit_demos/config/draw_square_rs.yaml` | RS 画矩形 demo 参数 |
 | `rebotarm_moveit_demos/config/pick_place.yaml` | 抓取放置 demo 参数 |
 | `rebotarm_moveit_demos/config/pick_place_rs.yaml` | RS 抓取放置 demo 参数 |
+
+---
+
+## 演示项目
+
+以下演示在仿真驱动（`fake_dm_bringup.launch.py`）和真机上均可运行，接口完全一致。
+运行前请确保驱动已启动：
+
+```bash
+source /opt/ros/jazzy/setup.bash   # Ubuntu 22.04 请换成 humble
+source install/setup.bash
+ros2 launch rebotarm_bringup fake_dm_bringup.launch.py   # 虚拟驱动 + RViz
+```
+
+### 打招呼（rebotarm_greeting）
+
+三位置点头问候，动作剧本在 `src/rebotarm_greeting/config/greeting.yaml`。
+
+```bash
+ros2 launch rebotarm_greeting greeting.launch.py
+# 触发：
+ros2 topic pub --once /rebotarm/greeting/start std_msgs/msg/Bool "{data: true}"
+```
+
+### 跳舞（rebotarm_dance）
+
+约 38s 的表演：开场抬臂、机械街舞两圈（TCP 钉在空中、身体律动）、沿矩形的
+空间滑步、指天定格收尾。所有关节轨迹均离线预计算（30Hz），运行时不在线解 IK。
+
+```bash
+ros2 launch rebotarm_dance dance.launch.py                    # 等待触发
+ros2 launch rebotarm_dance dance.launch.py auto_start:=true   # 自动开演
+# 触发：
+ros2 topic pub --once /rebotarm/dance/start std_msgs/msg/Bool "{data: true}"
+```
+
+调整动作顺序、时长或触发方式：改 `src/rebotarm_dance/config/dance.yaml`；
+改舞步本身需要重跑 `precompute_dance.py` 并重新编译，详见
+`src/rebotarm_dance/README.md`。
+
+### 手势识别（rebotarm_vision）
+
+摄像头 → MediaPipe Hands（21 关键点）→ 纯几何规则分类（不训练模型）→ 发布
+`/rebotarm/gesture_cmd`（`rock` / `paper` / `heart` / `none`）。额外依赖：
+
+```bash
+pip install --user --break-system-packages "mediapipe==0.10.14" "numpy==1.26.4"
+```
+
+`numpy` 必须保持 <2，否则会破坏 ROS2/pinocchio。
+
+```bash
+# 独立测试脚本（不进 ROS，用于调阈值），按 r 打印比值，q 退出：
+python3 src/rebotarm_vision/scripts/test_gesture.py
+
+# ROS 节点：
+ros2 launch rebotarm_vision vision.launch.py                    # 带调试窗口
+ros2 launch rebotarm_vision vision.launch.py show_debug:=false  # 无显示环境
+```
+
+### 手势动作（rebotarm_gesture_actions）
+
+识别到手势后回放对应的预计算 TCP 轨迹：
+
+| 手势 | 轨迹 | 动作 |
+|---|---|---|
+| ✊ 石头 | `rock_push` | TCP 沿基座 X 轴前后 ±6cm，快出慢收 ×3 |
+| ✋ 布 | `paper_figure8` | Y-Z 竖直面画 26×14cm 大 8 字 ×2，手腕同步扭转 |
+| 🫶 比心 | `heart_draw` | 两笔画心，高 22cm |
+
+完整链路（视觉 → 分发 → 回放），需先启动驱动：
+
+```bash
+ros2 launch rebotarm_vision vision.launch.py                    # 终端2
+ros2 launch rebotarm_gesture_actions gesture_actions.launch.py  # 终端3
+```
+
+分发节点为边沿触发：同一手势持续举着只执行一次，放下手（识别为 `none`）后
+再次举起才触发下一次。没有摄像头时也可以手动触发：
+
+```bash
+ros2 topic pub --once /rebotarm/action/play std_msgs/msg/String "{data: rock_push}"
+```
+
+重新生成轨迹的方法见 `src/rebotarm_gesture_actions/README.md`。
 
 ---
 

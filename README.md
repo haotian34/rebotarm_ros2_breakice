@@ -34,10 +34,10 @@ On top of the original version, it adds/modifies:
 
 | Addition | Description |
 |---|---|
-| `rebotarm_dance` | Arm dance motion node |
-| `rebotarm_greeting` | Greeting motion node |
-| `rebotarm_gesture_actions` | Gesture actions |
-| `rebotarm_vision` | Vision-related features |
+| `rebotarm_greeting` | Greeting demo: three-position nod, topic-triggered (see [Demo Projects](#demo-projects)) |
+| `rebotarm_dance` | Dance demo: ~38 s routine with offline precomputed trajectories (see [Demo Projects](#demo-projects)) |
+| `rebotarm_vision` | Gesture recognition: camera + MediaPipe, publishes `/rebotarm/gesture_cmd` |
+| `rebotarm_gesture_actions` | Gesture-triggered TCP trajectory playback (rock / paper / heart) |
 | `fake_dm_bringup.launch.py` | DM fake-hardware bringup (runs without a real arm) |
 
 ### Installation
@@ -67,6 +67,14 @@ On top of the original version, it adds/modifies:
    ros2 launch rebotarm_bringup fake_dm_bringup.launch.py
    ```
 
+4. **Gesture recognition dependency** (optional, only for the vision demo):
+
+   ```bash
+   pip install --user --break-system-packages "mediapipe==0.10.14" "numpy==1.26.4"
+   ```
+
+   `numpy` must stay <2, otherwise it breaks ROS2/pinocchio.
+
 Everything else works the same as the official version, see below.
 
 ---
@@ -80,7 +88,7 @@ wraps the current `reBotArm_control_py` Python control library into ROS2 topics,
 services and actions, providing a unified entry point for development, planning,
 RViz visualization, gravity compensation and per-motor debugging.
 
-The workspace contains five ROS2 packages:
+The workspace contains five core ROS2 packages:
 
 | Package | Purpose |
 |---|---|
@@ -89,6 +97,15 @@ The workspace contains five ROS2 packages:
 | `rebotarm_bringup` | Launch files, configs, URDF and RViz resources |
 | `rebotarm_moveit_config` | MoveIt 2 config, SRDF, ros2_control and RViz config |
 | `rebotarm_moveit_demos` | MoveIt 2 demos, including pick-place and rectangle drawing |
+
+plus four application demo packages (see [Demo Projects](#demo-projects)):
+
+| Package | Purpose |
+|---|---|
+| `rebotarm_greeting` | Topic-triggered three-position nod greeting |
+| `rebotarm_dance` | Dance routine with offline precomputed joint trajectories |
+| `rebotarm_vision` | MediaPipe-based gesture recognition (rock / paper / heart) |
+| `rebotarm_gesture_actions` | Gesture-to-trajectory dispatcher and player |
 
 ---
 
@@ -110,6 +127,7 @@ The workspace contains five ROS2 packages:
 | Arm | reBot Arm B601 DM or RS |
 | Communication | DM: USB serial bridge; RS: SocketCAN interface |
 | Host | Ubuntu 22.04+, ROS2, Python 3.10+ |
+| Camera | USB camera (only for the gesture-recognition demo) |
 
 Wiring:
 
@@ -231,10 +249,26 @@ rebotarm_ros2/
     ├── rebotarm_moveit_config/
     │   ├── config/
     │   └── launch/
-    └── rebotarm_moveit_demos/
-        ├── config/
+    ├── rebotarm_moveit_demos/
+    │   ├── config/
+    │   ├── launch/
+    │   └── rebotarm_moveit_demos/
+    ├── rebotarm_greeting/
+    │   ├── config/
+    │   ├── launch/
+    │   └── rebotarm_greeting/
+    ├── rebotarm_dance/
+    │   ├── config/
+    │   ├── launch/
+    │   └── rebotarm_dance/
+    ├── rebotarm_gesture_actions/
+    │   ├── config/
+    │   ├── launch/
+    │   └── rebotarm_gesture_actions/
+    └── rebotarm_vision/
         ├── launch/
-        └── rebotarm_moveit_demos/
+        ├── scripts/
+        └── rebotarm_vision/
 ```
 
 ---
@@ -656,6 +690,99 @@ Common parameters:
 | `rebotarm_moveit_demos/config/draw_square_rs.yaml` | RS draw-square demo parameters |
 | `rebotarm_moveit_demos/config/pick_place.yaml` | Pick-place demo parameters |
 | `rebotarm_moveit_demos/config/pick_place_rs.yaml` | RS pick-place demo parameters |
+
+---
+
+## Demo Projects
+
+The following demos run on both the fake DM driver (`fake_dm_bringup.launch.py`)
+and real hardware — the interfaces are identical. Each demo assumes the driver
+is already running:
+
+```bash
+source /opt/ros/jazzy/setup.bash   # use humble on Ubuntu 22.04
+source install/setup.bash
+ros2 launch rebotarm_bringup fake_dm_bringup.launch.py   # sim driver + RViz
+```
+
+### Greeting (rebotarm_greeting)
+
+Three-position nod greeting. The motion script lives in
+`src/rebotarm_greeting/config/greeting.yaml`.
+
+```bash
+ros2 launch rebotarm_greeting greeting.launch.py
+# trigger:
+ros2 topic pub --once /rebotarm/greeting/start std_msgs/msg/Bool "{data: true}"
+```
+
+### Dance (rebotarm_dance)
+
+A ~38 s routine: arm-raise intro, two rounds of robotic groove with the TCP
+pinned in mid-air, a spatial slide along a rectangle, and a final
+point-to-the-sky pose. All joint trajectories are precomputed offline at
+30 Hz, so no online IK runs during playback.
+
+```bash
+ros2 launch rebotarm_dance dance.launch.py                    # waits for trigger
+ros2 launch rebotarm_dance dance.launch.py auto_start:=true   # start immediately
+# trigger:
+ros2 topic pub --once /rebotarm/dance/start std_msgs/msg/Bool "{data: true}"
+```
+
+To adjust the step order, durations or trigger, edit
+`src/rebotarm_dance/config/dance.yaml`. To edit the moves themselves, re-run
+`precompute_dance.py` and rebuild the package; see
+`src/rebotarm_dance/README.md`.
+
+### Gesture recognition (rebotarm_vision)
+
+Camera → MediaPipe Hands (21 keypoints) → rule-based classifier (no model
+training) → publishes `/rebotarm/gesture_cmd` (`rock` / `paper` / `heart` /
+`none`). Extra dependency:
+
+```bash
+pip install --user --break-system-packages "mediapipe==0.10.14" "numpy==1.26.4"
+```
+
+`numpy` must stay <2, otherwise it breaks ROS2/pinocchio.
+
+```bash
+# standalone tuning tool (no ROS needed), press r to print ratios, q to quit:
+python3 src/rebotarm_vision/scripts/test_gesture.py
+
+# ROS node:
+ros2 launch rebotarm_vision vision.launch.py                    # with debug window
+ros2 launch rebotarm_vision vision.launch.py show_debug:=false  # headless
+```
+
+### Gesture actions (rebotarm_gesture_actions)
+
+Plays back a precomputed TCP trajectory when a gesture is recognized:
+
+| Gesture | Trajectory | Motion |
+|---|---|---|
+| ✊ rock | `rock_push` | TCP push-pull ±6 cm along base X, fast out / slow back ×3 |
+| ✋ paper | `paper_figure8` | 26×14 cm figure-8 in the Y-Z plane ×2, with wrist twist |
+| 🫶 heart | `heart_draw` | Two-stroke heart, 22 cm tall |
+
+Full pipeline (vision → dispatcher → player), with the driver already running:
+
+```bash
+ros2 launch rebotarm_vision vision.launch.py                    # terminal 2
+ros2 launch rebotarm_gesture_actions gesture_actions.launch.py  # terminal 3
+```
+
+The dispatcher is edge-triggered: holding a gesture fires the motion only
+once; lower the hand (recognized as `none`) and raise it again to retrigger.
+Without a camera, trigger a motion directly:
+
+```bash
+ros2 topic pub --once /rebotarm/action/play std_msgs/msg/String "{data: rock_push}"
+```
+
+See `src/rebotarm_gesture_actions/README.md` for how to regenerate the
+trajectories.
 
 ---
 
