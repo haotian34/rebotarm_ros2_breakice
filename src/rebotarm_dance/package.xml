@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>rebotarm_dance</name>
+  <version>0.1.0</version>
+  <description>Task 2: dance performance for reBot Arm (sim &amp; real); trajectories precomputed offline via IK, replayed with limit clamping</description>
+  <maintainer email="user@example.com">monkeyking</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>rebotarm_msgs</depend>
+  <depend>ament_index_python</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

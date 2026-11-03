@@ -57,6 +57,21 @@ class FakeRsDriver(Node):
         self.gripper_open_position = max(
             0.01, float(self.get_parameter("gripper_open_position").value)
         )
+        self.declare_parameter(
+            "gripper_visual_joint_names", ["gripper_joint1", "gripper_joint2"]
+        )
+        # 关节限位：扁平化的 12 个数 (j1_lo, j1_hi, ..., j6_lo, j6_hi)
+        # 默认保持 RS 型号限位；DM 启动文件会传入 DM 的负向限位
+        self.declare_parameter(
+            "joint_limits", [v for pair in _JOINT_LIMITS for v in pair]
+        )
+        flat = list(self.get_parameter("joint_limits").value)
+        self.joint_limits = [
+            (float(flat[i]), float(flat[i + 1])) for i in range(0, 12, 2)
+        ]
+        self.gripper_visual_joint_names = list(
+            self.get_parameter("gripper_visual_joint_names").value
+        )
         self.enabled = bool(self.get_parameter("start_enabled").value)
 
         self.positions = [0.0] * 6
@@ -193,7 +208,7 @@ class FakeRsDriver(Node):
     def _set_joint_target(self, index: int, target: float) -> None:
         if not self.enabled or self.state_machine == "GRAVITY_COMP":
             return
-        lower, upper = _JOINT_LIMITS[index]
+        lower, upper = self.joint_limits[index]
         self.targets[index] = self._clamp(float(target), lower, upper)
         self.state_machine = "LOWLEVEL_STREAMING"
         self.publish_status()
@@ -323,10 +338,11 @@ class FakeRsDriver(Node):
             / self.gripper_open_position
             * _GRIPPER_VISUAL_HALF_OPEN_M
         )
-        msg.name.extend(["gripper_joint1", "gripper_joint2"])
-        msg.position.extend([visual_position, visual_position])
-        msg.velocity.extend([visual_velocity, visual_velocity])
-        msg.effort.extend([0.0, 0.0])
+        visual_names = self.gripper_visual_joint_names
+        msg.name.extend(visual_names)
+        msg.position.extend([visual_position] * len(visual_names))
+        msg.velocity.extend([visual_velocity] * len(visual_names))
+        msg.effort.extend([0.0] * len(visual_names))
         self.joint_state_pub.publish(msg)
 
         for index, name in enumerate(self.joint_names):

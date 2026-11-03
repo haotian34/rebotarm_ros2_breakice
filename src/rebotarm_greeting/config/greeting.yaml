@@ -1,0 +1,96 @@
+# ============================================================
+# reBot Arm 任务一：三位置点头问候 —— 动作剧本配置
+# 所有角度单位：弧度（rad）；时间单位：秒（s）
+# 关节对应：joint1=底座旋转 joint2/joint3=肩肘 joint4/joint5/joint6=腕部
+# 改动作只需要改这个文件，不用动代码
+# ============================================================
+
+greeting:
+  # 各关节安全限位（与 DM 模型一致），超出会被自动钳制
+  # 注意：DM 的 joint2/joint3 是「负向范围」，0 = 手臂竖直向上，
+  # 负值使手臂弯下。绝对不要给 joint2/joint3 正数！
+  joint_limits:
+    joint1: [-2.8, 2.8]
+    joint2: [-3.14, 0.0]
+    joint3: [-3.14, 0.0]
+    joint4: [-1.87, 1.57]
+    joint5: [-1.57, 1.57]
+    joint6: [-3.14, 3.14]
+
+  # 问候基准姿态：「鸡脖子」悬空抬起
+  # 经 URDF 正运动学计算：末端(夹爪根部)位于 前方0.28m / 高0.46m，
+  # 大臂小臂弯成 S 形竖在空中，像鸡伸脖子；离限位很远，安全
+  # （joint2/joint3 在 DM 上是负向范围，0=水平前伸，负值抬起）
+  home_pose:
+    joint1: 0.0
+    joint2: -0.62
+    joint3: -0.85
+    joint4: 0.0
+    joint5: 0.0
+    joint6: 0.0
+
+  # 三个问候位置（底座 joint1 均分：左 / 中 / 右）
+  positions:
+    - name: left
+      joint1: 0.9
+    - name: center
+      joint1: 0.0
+    - name: right
+      joint1: -0.9
+
+  # 点头参数：joint4（脖子根部的俯仰关节）往复
+  # 在此姿态下 joint4 轴向为侧向水平，转动=头部在竖直面内俯仰，
+  # 即真正的「点头」；joint5 在该姿态下是扭头，不要用错
+  nod:
+    joint: joint4
+    amplitude: 0.25      # 点头幅度（约 14°）
+    times: 2             # 每个位置点头次数
+    period: 0.9          # 单次点头周期（秒）
+    beak: true           # 鸡啄米：点头时夹爪联动（低头张嘴、抬头闭嘴）
+
+  # 挥手参数：腕部 joint6 往复（左右两侧的附加动作 + 结束告别）
+  wave:
+    joint: joint6
+    amplitude: 0.5
+    period: 0.7
+
+  # 夹爪（仿真中张开位置，真实 DM 上为 -5.0）
+  gripper:
+    open_pos: 5.0
+    close_pos: 0.0
+    speed: 2.0
+
+  # ---------- 动作剧本 ----------
+  # 步骤类型：
+  #   move    平滑移动到指定关节目标（duration 内余弦缓动插值）
+  #   nod     在目标位置点头 times 次
+  #   wave    挥手 times 次
+  #   gripper 夹爪开(open)/合(close)/交替(toggle times 次)
+  #   wait    停顿
+  sequence:
+    # 1. 进入问候姿态
+    - {type: move, target: home_pose, duration: 2.5, comment: "抬臂进入问候姿态"}
+
+    # 2. 夹爪开合两次"鸣喙"吸引注意，随后合上
+    - {type: gripper, action: toggle, times: 2, dwell: 0.35}
+    - {type: gripper, action: close}
+    - {type: wait, duration: 0.4}
+
+    # 3. 左 / 中 / 右 三位置致意
+    - {type: move, to_position: left,   duration: 1.8}
+    - {type: nod}
+    - {type: wave, times: 1}
+    - {type: move, to_position: center, duration: 1.8}
+    - {type: nod}
+    - {type: move, to_position: right,  duration: 1.8}
+    - {type: nod}
+    - {type: wave, times: 1}
+
+    # 4. 回到中央，挥手告别
+    - {type: move, to_position: center, duration: 1.8}
+    - {type: wave, times: 3}
+    # 结束：夹爪收拢，干净利落
+    - {type: gripper, action: close}
+
+    # 5. 回到初始位（全零）
+    - {type: move, target: zeros, duration: 2.5}

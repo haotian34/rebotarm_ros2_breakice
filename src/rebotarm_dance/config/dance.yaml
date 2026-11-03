@@ -1,0 +1,83 @@
+# ============================================================
+# reBot Arm 任务二：舞蹈表演 —— 动作剧本配置
+# 所有角度单位：弧度（rad）；时间单位：秒（s）
+# 关节对应：joint1=底座旋转 joint2/joint3=肩肘 joint4/j5/j6=腕部
+#
+# 剧本（sequence）只决定「做什么、什么顺序」；
+# 两段舞蹈的逐帧关节轨迹在 dance_tracks.yaml 中，
+# 由 rebotarm_dance/precompute_dance.py 离线 IK 生成（勿手改）。
+# 改舞步参数请改 precompute_dance.py 顶部 GROOVE / SLIDE 后重跑。
+# ============================================================
+
+dance:
+  # 各关节安全限位（与 DM URDF 一致），超出会被自动钳制
+  # 注意：DM 的 joint2/joint3 是「负向范围」，绝对不要给正数！
+  joint_limits:
+    joint1: [-2.8, 2.8]
+    joint2: [-3.14, 0.0]
+    joint3: [-3.14, 0.0]
+    joint4: [-1.87, 1.57]
+    joint5: [-1.57, 1.57]
+    joint6: [-3.14, 3.14]
+
+  # 悬空鸡脖子基准姿态：TCP = 前方0.284m / 高0.459m
+  # 两段舞蹈轨迹都以此为首尾锚点
+  home_pose:
+    joint1: 0.0
+    joint2: -0.62
+    joint3: -0.85
+    joint4: 0.0
+    joint5: 0.0
+    joint6: 0.0
+
+  # 结束 pose：「高举指天」——手臂收成倒 V、肘部冲天，
+  # TCP 位于头顶上方 0.64m，底座侧转 0.4rad，腕部扭转甩出造型
+  # （FK 已验证：TCP=[0.061, 0.026, 0.644]，限位余量 0.35rad）
+  final_pose:
+    joint1: 0.4
+    joint2: -0.35
+    joint3: -1.2
+    joint4: 0.0
+    joint5: 0.0
+    joint6: 0.6
+
+  # 夹爪（仿真中张开位置，真实 DM 上为 -5.0）
+  gripper:
+    open_pos: 5.0
+    close_pos: 0.0
+    speed: 2.0
+
+  # ---------- 动作剧本 ----------
+  # 步骤类型：
+  #   move     平滑移动到命名姿态（home_pose / final_pose / zeros），余弦缓动
+  #   track    回放 dance_tracks.yaml 中预计算的轨迹（30Hz 逐帧，限位钳制）
+  #   gripper  夹爪开(open)/合(close)/交替(toggle times 次)
+  #   wait     停顿
+  sequence:
+    # 1. 开场：从零位抬臂进入中央「悬空鸡脖子」姿态
+    - {type: move, target: home_pose, duration: 2.5, comment: "开场抬臂"}
+    - {type: gripper, action: toggle, times: 2, dwell: 0.3, comment: "亮爪打招呼"}
+    - {type: gripper, action: open}
+    - {type: wait, duration: 0.3}
+
+    # 2. 第一段「机械街舞」：TCP 钉死在空中不动，底座+肩肘律动、
+    #    腕部自动补偿（预计算轨迹），跳两圈后自动回到悬空姿态
+    - {type: track, name: groove, times: 2, comment: "机械街舞 x2 圈"}
+
+    # 3. 复位回悬空姿态（轨迹首尾都是 home，此步只是稳定停顿）
+    - {type: move, target: home_pose, duration: 1.0, comment: "复位稳定"}
+
+    # 4. 第二段「空间滑步」：TCP 走矩形 左上→左下→右下→右上→左上，
+    #    位置 IK + 链式初值，腕部姿态自然保持大致朝前（漂移<21°），
+    #    最后自动滑回 home
+    - {type: track, name: slide, comment: "空间滑步"}
+
+    # 5. 复位，摆结束 pose：收拢→亮爪→高举指天，悬空定格 1 秒
+    - {type: move, target: home_pose, duration: 1.2, comment: "复位"}
+    - {type: gripper, action: close}
+    - {type: move, target: final_pose, duration: 1.8, comment: "高举指天造型"}
+    - {type: wait, duration: 1.0, comment: "悬空定格展示"}
+    - {type: gripper, action: close}
+
+    # 6. 谢幕回零位
+    - {type: move, target: zeros, duration: 2.5, comment: "回零位结束"}
