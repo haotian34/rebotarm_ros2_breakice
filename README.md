@@ -26,6 +26,51 @@
 
 ---
 
+## About This Repository (Modified Fork)
+
+This repository is a personal modified fork of Seeed's official open-source project
+[reBotArmController_ROS2](https://github.com/Seeed-Projects/reBotArmController_ROS2).
+On top of the original version, it adds/modifies:
+
+| Addition | Description |
+|---|---|
+| `rebotarm_dance` | Arm dance motion node |
+| `rebotarm_greeting` | Greeting motion node |
+| `rebotarm_gesture_actions` | Gesture actions |
+| `rebotarm_vision` | Vision-related features |
+| `fake_dm_bringup.launch.py` | DM fake-hardware bringup (runs without a real arm) |
+
+### Installation
+
+1. **Environment setup**: follow steps 1, 2 and 4 of the official wiki
+   (install ROS2, dependencies and motorbridge). The two `git clone` commands
+   from official steps 3 and 5 are already merged into step 2 below — no need
+   to run them separately:
+   <https://wiki.seeedstudio.com/cn/rebot_arm_b601_dm_ros2_integration/>
+2. **Clone this repository and the low-level SDK** (covers official steps 3
+   and 5. Note: use THIS repo's URL for the workspace, but keep Seeed's official
+   URL for the `reBotArm_control_py` SDK — third_party is not included here):
+
+   ```bash
+   git clone https://github.com/haotian34/rebotarm_ros2_breakice.git
+   cd rebotarm_ros2_breakice
+   mkdir -p third_party
+   git clone https://github.com/Seeed-Projects/reBotArm_control_py.git third_party/reBotArm_control_py
+   ```
+
+3. **Build and run**:
+
+   ```bash
+   source /opt/ros/jazzy/setup.bash   # use humble on Ubuntu 22.04
+   colcon build --symlink-install
+   source install/setup.bash
+   ros2 launch rebotarm_bringup fake_dm_bringup.launch.py
+   ```
+
+Everything else works the same as the official version, see below.
+
+---
+
 ## Overview
 
 Current version: `v0.3.0`

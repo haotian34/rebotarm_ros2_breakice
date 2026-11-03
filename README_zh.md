@@ -26,6 +26,47 @@
 
 ---
 
+## 关于本仓库（二次开发版）
+
+本仓库基于 Seeed 官方开源项目 [reBotArmController_ROS2](https://github.com/Seeed-Projects/reBotArmController_ROS2)
+修改，供个人学习与交流使用。在原版基础上新增/修改了：
+
+| 新增内容 | 说明 |
+|---|---|
+| `rebotarm_dance` | 机械臂舞蹈动作节点 |
+| `rebotarm_greeting` | 打招呼动作节点 |
+| `rebotarm_gesture_actions` | 手势动作 |
+| `rebotarm_vision` | 视觉相关功能 |
+| `fake_dm_bringup.launch.py` | DM 版仿真启动（无真机也可运行） |
+
+### 安装方式
+
+1. **环境配置**：参照官方 wiki 文档，完成步骤 1、2、4（安装 ROS2、依赖、motorbridge）。
+   官方文档的步骤 3、5（两次 git clone）**不用单独执行**，已合并到下方第 2 条的命令中：
+   <https://wiki.seeedstudio.com/cn/rebot_arm_b601_dm_ros2_integration/>
+2. **克隆本仓库和底层 SDK**（对应官方步骤 3 和 5。注意：工作空间用本仓库地址，
+   底层 SDK `reBotArm_control_py` 仍用 Seeed 官方地址，本仓库不包含 third_party）：
+
+   ```bash
+   git clone https://github.com/haotian34/rebotarm_ros2_breakice.git
+   cd rebotarm_ros2_breakice
+   mkdir -p third_party
+   git clone https://github.com/Seeed-Projects/reBotArm_control_py.git third_party/reBotArm_control_py
+   ```
+
+3. **编译运行**：
+
+   ```bash
+   source /opt/ros/jazzy/setup.bash   # Ubuntu 22.04 请换成 humble
+   colcon build --symlink-install
+   source install/setup.bash
+   ros2 launch rebotarm_bringup fake_dm_bringup.launch.py
+   ```
+
+其余使用方法与官方版本一致，详见下文。
+
+---
+
 ## 项目介绍
 
 当前版本：`v0.3.0`
