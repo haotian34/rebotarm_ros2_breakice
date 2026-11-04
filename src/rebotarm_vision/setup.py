@@ -21,6 +21,7 @@ setup(
     license="MIT",
     entry_points={
         "console_scripts": [
+            "palm_follow_node = rebotarm_vision.palm_follow_node:main",
             "vision_gesture_node = rebotarm_vision.vision_gesture_node:main",
         ],
     },

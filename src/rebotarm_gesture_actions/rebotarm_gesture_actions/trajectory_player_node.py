@@ -115,6 +115,8 @@ class TrajectoryPlayerNode(Node):
         self.dt = 1.0 / self.rate_hz
         self.create_timer(self.dt, self._tick)
         self._publish_status("IDLE")
+        # Heartbeat lets late-joining command sources verify player availability.
+        self.create_timer(1.0, self._status_heartbeat)
         self.get_logger().info(
             f"轨迹播放器就绪：ros2 topic pub --once /{ns}/action/play "
             "std_msgs/msg/String \"{data: rock_push}\"")
@@ -146,6 +148,10 @@ class TrajectoryPlayerNode(Node):
         self._publish_status(f"BUSY:{name}")
         self.get_logger().info(f"开始播放 [{name}]（{len(self.frames)} 帧，"
                                f"{len(self.frames) / self.rate_hz:.1f}s）")
+
+    def _status_heartbeat(self):
+        self._publish_status("IDLE" if self.state == "IDLE"
+                             else f"BUSY:{self.track_name}")
 
     def _publish_status(self, text: str):
         self.status_pub.publish(String(data=text))

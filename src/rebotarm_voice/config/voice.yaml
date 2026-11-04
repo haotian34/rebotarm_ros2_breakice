@@ -1,0 +1,16 @@
+rebotarm_voice:
+  ros__parameters:
+    wake_word: 机械臂
+    record_seconds: 4.0
+    sample_rate: 16000
+    audio_device: ''
+    min_rms: 0.01
+    language: zh
+    model_size: base
+    model_device: cpu
+    compute_type: int8
+    model_cache: ''
+    cpu_threads: 4
+    max_command_age: 25.0
+    cooldown_sec: 2.0
+    status_timeout: 3.0

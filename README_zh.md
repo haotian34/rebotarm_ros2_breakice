@@ -867,3 +867,8 @@ rm -f /dev/shm/fastrtps_port*
 ```bash
 export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
 ```
+
+
+## Whisper 语音动作控制（DM）
+
+新增 `rebotarm_voice`：麦克风录音 → 本地 Whisper（faster-whisper，无需 API Key） → 固定中文口令 → 现有 DM 轨迹播放器。支持出拳、画八字、画爱心和画圆，默认仅识别不执行。安装、仿真启动及执行配置见 [语音模块说明](src/rebotarm_voice/README.md)。

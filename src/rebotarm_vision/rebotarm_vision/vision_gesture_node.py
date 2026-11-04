@@ -21,6 +21,7 @@ import mediapipe as mp
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
+from geometry_msgs.msg import PointStamped
 
 from rebotarm_vision.gesture_classifier import DEFAULT_PARAMS, classify
 
@@ -31,6 +32,7 @@ class VisionGestureNode(Node):
 
         self.declare_parameter("arm_namespace", "rebotarm")
         self.declare_parameter("camera_index", 0)
+        self.declare_parameter("publish_gestures", True)
         self.declare_parameter("frame_width", 640)
         self.declare_parameter("frame_height", 480)
         self.declare_parameter("rate_hz", 30.0)
@@ -55,6 +57,8 @@ class VisionGestureNode(Node):
             if v > 0.0:
                 self.params[key] = v
 
+        self.palm_pub = self.create_publisher(PointStamped, f"/{ns}/palm_position", 1)
+        self.publish_gestures = bool(self.get_parameter("publish_gestures").value)
         self.pub = self.create_publisher(String, f"/{ns}/gesture_cmd", 10)
 
         self.cap = cv2.VideoCapture(int(self.get_parameter("camera_index").value))
@@ -97,6 +101,17 @@ class VisionGestureNode(Node):
                 hand_lms.append([(lm.x * w, lm.y * h) for lm in hl.landmark])
 
         raw = classify(hand_lms, self.params)
+        # Only a single open palm authorizes following; invalid frames explicitly
+        # disarm the follower instead of waiting for the gesture debounce.
+        palm = PointStamped()
+        palm.header.stamp = self.get_clock().now().to_msg()
+        palm.header.frame_id = "camera_normalized"
+        if raw == "paper" and len(hand_lms) == 1:
+            points = [hand_lms[0][i] for i in (0, 5, 9, 13, 17)]
+            palm.point.x = sum(p[0] for p in points) / (5 * w)
+            palm.point.y = sum(p[1] for p in points) / (5 * h)
+            palm.point.z = 1.0  # validity flag, NOT metric depth
+        self.palm_pub.publish(palm)
 
         # 去抖：连续 N 帧一致才切换稳定输出
         self.history.append(raw)
@@ -123,7 +138,8 @@ class VisionGestureNode(Node):
             cv2.waitKey(1)
 
     def _publish(self):
-        self.pub.publish(String(data=self.stable))
+        if self.publish_gestures:
+            self.pub.publish(String(data=self.stable))
         self.last_pub_time = self.get_clock().now().nanoseconds * 1e-9
         self.get_logger().info(f"手势 -> {self.stable}")
 
