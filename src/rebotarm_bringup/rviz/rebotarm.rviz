@@ -1,36 +1,265 @@
 Panels:
-  - Class: rviz_common/Displays
+  []
 Visualization Manager:
   Class: ""
   Displays:
-    - Class: rviz_default_plugins/Grid
+    - Alpha: 0.5
+      Cell Size: 1
+      Class: rviz_default_plugins/Grid
+      Color: 160; 160; 164
       Enabled: true
+      Line Style:
+        Line Width: 0.029999999329447746
+        Value: Lines
       Name: Grid
-    - Class: rviz_default_plugins/RobotModel
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 10
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Collision Enabled: false
+      Description File: ""
+      Description Source: Topic
       Description Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
         Value: /robot_description
       Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: Links in Alphabetic Order
+        base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        base_link__rviz_visual_colored_base_link_hardware_black:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        base_link__rviz_visual_colored_base_link_matte_black:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        end_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        end_link__rviz_visual_colored_gripper_base_hardware_black:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        end_link__rviz_visual_colored_gripper_base_metal:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        finger_left_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        finger_left_link__rviz_visual_colored_left_finger_carriage_grey:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        finger_left_link__rviz_visual_colored_left_finger_rack_metal:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        finger_left_link__rviz_visual_colored_left_finger_travel_stop_yellow:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        finger_right_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        finger_right_link__rviz_visual_colored_right_finger_carriage_grey:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        finger_right_link__rviz_visual_colored_right_finger_rack_metal:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        finger_right_link__rviz_visual_colored_right_finger_travel_stop_yellow:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link1__rviz_visual_colored_link1_anodized_grey:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link1__rviz_visual_colored_link1_hardware_black:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link2:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link2__rviz_visual_colored_link2_anodized_grey:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link2__rviz_visual_colored_link2_hardware_black:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link2__rviz_visual_colored_link2_matte_black:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link3:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link3__rviz_visual_colored_link3_anodized_grey:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link3__rviz_visual_colored_link3_hardware_black:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link3__rviz_visual_colored_link3_matte_black:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link4:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link4__rviz_visual_colored_link4_anodized_grey:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link4__rviz_visual_colored_link4_hardware_black:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link4__rviz_visual_colored_link4_matte_black:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link5:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link5__rviz_visual_colored_link5_anodized_grey:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link5__rviz_visual_colored_link5_hardware_black:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link6:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        link6__rviz_visual_colored_link6_hardware_black:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+      Mass Properties:
+        Inertia: false
+        Mass: false
       Name: RobotModel
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
   Enabled: true
   Global Options:
+    Background Color: 48; 48; 48
     Fixed Frame: base_link
+    Frame Rate: 30
   Name: root
   Tools:
     - Class: rviz_default_plugins/Interact
       Hide Inactive Objects: true
     - Class: rviz_default_plugins/MoveCamera
     - Class: rviz_default_plugins/Select
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 1.2
+      Distance: 1.1694066524505615
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
       Focal Point:
-        X: 0
-        Y: 0
-        Z: 0.25
+        X: -0.05223265290260315
+        Y: -0.0013979842187836766
+        Z: 0.2129652053117752
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
       Name: Current View
-      Pitch: 0.5
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.04500021040439606
       Target Frame: base_link
       Value: Orbit (rviz)
-      Yaw: 0.8
+      Yaw: 5.868178367614746
     Saved: ~
+Window Geometry:
+  Height: 575
+  Hide Left Dock: false
+  Hide Right Dock: false
+  QMainWindow State: 000000ff00000000fd000000000000032f000001e100000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Width: 815
+  X: 866
+  Y: 702
