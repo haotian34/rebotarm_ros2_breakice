@@ -1,6 +1,6 @@
 rebotarm_voice:
   ros__parameters:
-    wake_word: 机械臂
+    wake_word: ''
     record_seconds: 4.0
     sample_rate: 16000
     audio_device: ''

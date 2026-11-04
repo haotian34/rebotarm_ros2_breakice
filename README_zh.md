@@ -24,6 +24,8 @@
   </strong>
 </p>
 
+**启动操作入口：** [各功能启动操作速查](#各功能启动操作速查)（仿真、真机、手势、手掌跟随、本地语音、RViz 字幕、MoveIt、MuJoCo、Agent）。
+
 ---
 
 ## 关于本仓库（二次开发版）
@@ -35,7 +37,8 @@
 |---|---|
 | `rebotarm_greeting` | 打招呼演示：三位置点头，topic 触发（见[演示项目](#演示项目)） |
 | `rebotarm_dance` | 跳舞演示：约 38s 舞蹈，轨迹离线预计算（见[演示项目](#演示项目)） |
-| `rebotarm_vision` | 手势识别：摄像头 + MediaPipe，发布 `/rebotarm/gesture_cmd` |
+| `rebotarm_vision` | 手势识别和手掌位置跟随：摄像头 + MediaPipe |
+| `rebotarm_voice` | 本地免费 Whisper 语音控制与 RViz 中文字幕，无需 API Key |
 | `rebotarm_gesture_actions` | 手势触发的 TCP 轨迹动作（石头 / 布 / 比心） |
 | `fake_dm_bringup.launch.py` | DM 版仿真启动（无真机也可运行） |
 
@@ -93,7 +96,7 @@
 | `rebotarm_moveit_config` | MoveIt 2 配置、SRDF、ros2_control、RViz 配置 |
 | `rebotarm_moveit_demos` | MoveIt 2 应用示例，如抓取放置和矩形轨迹 |
 
-以及四个演示应用包（见[演示项目](#演示项目)）：
+以及演示和上层应用包（见[启动操作速查](#各功能启动操作速查)）：
 
 | 包 | 作用 |
 |---|---|
@@ -101,6 +104,9 @@
 | `rebotarm_dance` | 舞蹈表演，关节轨迹离线预计算 |
 | `rebotarm_vision` | 基于 MediaPipe 的手势识别（石头 / 布 / 比心） |
 | `rebotarm_gesture_actions` | 手势到轨迹的分发与回放 |
+| `rebotarm_voice` | 本地 Whisper 语音识别、动作控制与 RViz 中文字幕 |
+| `rebotarm_mujoco_rs` | RS MuJoCo 场景、相机和任务接口 |
+| `rebotarm_agent` | MCP 工具、文本 Agent 与 Dashboard |
 
 ---
 
@@ -868,7 +874,339 @@ rm -f /dev/shm/fastrtps_port*
 export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
 ```
 
+---
 
-## Whisper 语音动作控制（DM）
+## 各功能启动操作速查
 
-新增 `rebotarm_voice`：麦克风录音 → 本地 Whisper（faster-whisper，无需 API Key） → 固定中文口令 → 现有 DM 轨迹播放器。支持出拳、画八字、画爱心和画圆，默认仅识别不执行。安装、仿真启动及执行配置见 [语音模块说明](src/rebotarm_voice/README.md)。
+本节集中列出日常操作。命令以当前工作空间 `/home/syh/rebotarm_ros2`、ROS 2 Jazzy 为例；
+其他安装位置请替换目录，Humble 用户将 `jazzy` 改为 `humble`。
+
+### 1. 每个终端先加载环境
+
+```bash
+cd /home/syh/rebotarm_ros2
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+```
+
+若终端自动进入 Conda，先 `conda deactivate`，直到 `which python3` 指向系统 Python。
+本机 Jazzy 使用 `/usr/bin/python3`（Python 3.12）。同一组节点使用相同的 `ROS_DOMAIN_ID`。
+首次构建或新增包后执行，再在其他终端重新 source：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+| 想做什么 | 需要启动的功能 | 适用范围 |
+|---|---|---|
+| 无真机观察机械臂 | 下方 DM / RS 仿真驱动之一 | DM / RS |
+| 招手、跳舞 | 驱动 + 对应演示节点 + 触发命令 | 本仓库演示默认 DM |
+| 手势触发动作 | 驱动 + 摄像头识别 + 手势动作调度 | DM |
+| 手掌位置跟随 | 驱动 + palm_follow | DM |
+| 本地语音控制及字幕 | 驱动 + voice_control + listen 服务 | DM |
+| 轨迹规划、画矩形、抓取放置 | MoveIt demo，或驱动 + MoveIt hardware | DM / RS，model 保持一致 |
+| RS 物理仿真、颜色识别 | MuJoCo 模型资源 + mujoco_rs | RS，需额外依赖 |
+| MCP 工具 / 文本代理 | 可用 ROS 接口 + MCP；文本代理另需模型服务 | 默认命名空间 rebotarm_rs |
+
+每个长期运行的 launch 占用一个终端；触发命令在另一个终端执行。
+**同一命名空间只启动一个驱动；舞蹈、招手、手势轨迹、手掌跟随、语音动作、MoveIt 等
+运动控制功能切换运行。** 现有低层关节话题没有跨模块的全局互斥锁。
+
+### 2. 启动仿真或真机驱动（选择一种）
+
+DM 仿真（默认带 RViz，也是下面 DM 演示的推荐入口）：
+
+```bash
+ros2 launch rebotarm_bringup fake_dm_bringup.launch.py
+```
+
+RS 简易仿真：
+
+```bash
+ros2 launch rebotarm_bringup fake_rs_bringup.launch.py
+```
+
+DM 真机（串口按实际设备修改）：
+
+```bash
+ros2 launch rebotarm_bringup bringup.launch.py model:=dm channel:=/dev/ttyACM0 use_rviz:=true
+```
+
+RS 真机（先按硬件说明配置 SocketCAN）：
+
+```bash
+ros2 launch rebotarm_bringup bringup.launch.py model:=rs channel:=can0 arm_namespace:=rebotarm_rs use_rviz:=true
+```
+
+只运行真机驱动、不启动模型与 RViz：
+
+```bash
+ros2 launch rebotarm_bringup driver.launch.py model:=dm channel:=/dev/ttyACM0
+```
+
+基础状态和服务（RS 命令改为 `/rebotarm_rs/...`）：
+
+```bash
+ros2 topic echo /rebotarm/arm_status
+ros2 service call /rebotarm/enable std_srvs/srv/Trigger '{}'
+ros2 service call /rebotarm/safe_home std_srvs/srv/Trigger '{}'
+```
+
+`safe_home` 会运动到安全位，真机默认随后失能。仅在现场准备就绪时调用运动服务。
+底层单关节、Pose、夹爪和重力补偿示例见本文“示例脚本 / Example Scripts”及 [API 文档](API_zh.md)。
+
+### 3. 打招呼与跳舞
+
+先保持 DM 驱动运行，以下两种演示分别启动。
+
+```bash
+# 终端二：打招呼，等待触发
+ros2 launch rebotarm_greeting greeting.launch.py
+```
+
+```bash
+# 终端三：触发一次打招呼
+ros2 topic pub --once /rebotarm/greeting/start std_msgs/msg/Bool '{data: true}'
+```
+
+停止打招呼节点后，可切换跳舞：
+
+```bash
+# 终端二：跳舞，等待触发
+ros2 launch rebotarm_dance dance.launch.py
+```
+
+```bash
+# 终端三：触发一次跳舞
+ros2 topic pub --once /rebotarm/dance/start std_msgs/msg/Bool '{data: true}'
+```
+
+两种 launch 都支持 `auto_start:=true`，启动后立即演示一次。
+舞蹈还支持 `track_speed:=1.0`，默认倍率为 `2.0`。
+
+### 4. 摄像头手势识别与手势动作
+
+首次使用安装视觉依赖（使用系统 Python，保持本项目 NumPy 版本）：
+
+```bash
+/usr/bin/python3 -m pip install --user --break-system-packages 'mediapipe==0.10.14' 'numpy==1.26.4'
+```
+
+先保持 DM 驱动运行：
+
+```bash
+# 终端二：摄像头识别
+ros2 launch rebotarm_vision vision.launch.py camera_index:=0 show_debug:=true
+```
+
+```bash
+# 终端三：手势调度 + 轨迹播放器
+ros2 launch rebotarm_gesture_actions gesture_actions.launch.py
+```
+
+握拳 → 出拳；张开手掌 → 画八字；双手比心 → 画爱心。
+持续保持同一手势只执行一次，放下手并等待冷却后再次举起才能重新触发。
+仅查看识别结果、不执行动作时，不启动终端三：
+
+```bash
+ros2 topic echo /rebotarm/gesture_cmd
+```
+
+没有摄像头时，保持播放器运行也可以手动触发：
+
+```bash
+ros2 topic pub --once /rebotarm/action/play std_msgs/msg/String '{data: heart_draw}'
+```
+
+轨迹名还有 `rock_push`、`paper_figure8`、`paper_circle`。
+摄像头编号可修改 `camera_index`；不需要调试窗口时使用 `show_debug:=false`。
+
+### 5. 手掌位置跟随
+
+停止语音动作、手势播放器、舞蹈等控制节点，保持 DM 驱动运行，然后执行：
+
+```bash
+ros2 launch rebotarm_vision palm_follow.launch.py camera_index:=0 show_debug:=true
+```
+
+单手张开稳定后获取基准，移动手掌即可控制末端左右、上下移动；握拳、双手入镜或
+手掌消失会暂停。重新张开时从当前位置重新获取基准，不自动回零。
+建议先把机械臂置于舒展的悬空姿态，避免全零奇异位形。该功能不做环境/自碰撞规划。
+详细参数见 [视觉与手掌跟随说明](src/rebotarm_vision/README.md)。
+
+### 6. 本地免费 Whisper 语音控制
+
+无需 OpenAI API Key，无 API 调用费用，音频不上传。首次安装依赖和下载模型：
+
+```bash
+sudo apt-get install -y libportaudio2 fonts-noto-cjk python3-pil
+/usr/bin/python3 -m pip install --user --break-system-packages 'faster-whisper>=1.1,<2' 'sounddevice>=0.4' 'numpy==1.26.4' Pillow
+ros2 run rebotarm_voice download_model --model base
+```
+
+本机已安装依赖并下载 `base` 模型，无需重复下载。模型下载完毕后可断网识别。
+先保持 DM 仿真或真机驱动运行，停止其他运动控制节点。
+
+```bash
+# 终端二：先只识别、不发送动作
+ros2 launch rebotarm_voice voice_control.launch.py
+```
+
+等待终端显示 `READY: local Whisper loaded` 后，在另一个终端触发：
+
+```bash
+# 终端三：每次调用录音 4 秒；命令执行后立即说话
+ros2 service call /rebotarm/voice/listen std_srvs/srv/Trigger '{}'
+```
+
+| 口令 | 动作 |
+|---|---|
+| 出拳 | 出拳 |
+| 画八字 | 画八字 |
+| 画爱心 | 画爱心 |
+| 画圆 | 画圆 |
+
+直接说动作命令即可，无需“机械臂”前缀；可加“请”，例如“请画爱心”。
+服务返回 `Recording started` 只表示开始录音；录音结束并完成推理后才输出识别文字。
+确认识别效果后，停止终端二中的语音 launch，替换为执行模式：
+
+```bash
+ros2 launch rebotarm_voice voice_control.launch.py execute_motion:=true
+```
+
+如果已有 `gesture_actions.launch.py` 中的播放器，启动语音时加 `start_player:=false`，
+不要重复启动播放器；专门做语音演示时建议停掉手势链路，让语音 launch 管理播放器。
+
+查看识别结果、状态及麦克风列表：
+
+```bash
+ros2 topic echo /rebotarm/voice/transcript
+ros2 topic echo /rebotarm/voice/status
+/usr/bin/python3 -m sounddevice
+```
+
+`DRY_RUN`：仅预览；`REQUESTED`：已发送动作请求；`IGNORED`：口令无效、过期或当前不可执行；
+`ERROR`：查看语音节点日志。动作执行中与冷却期间不接受新动作。
+本功能目前只适配 DM，不能仅通过更改命名空间用于 RS。
+
+### 7. 把语音字幕叠加到 RViz 画面底部
+
+语音 launch 默认启动字幕节点。字幕为红色、透明背景，直接叠加在机械臂三维画面底部居中。
+需要 `rviz_2d_overlay_msgs` 与 `rviz_2d_overlay_plugins`（本机已构建）；其他机器的
+安装或固定版本源码构建步骤见 [语音模块说明](src/rebotarm_voice/README.md#rviz-底部红色叠加字幕)。
+
+重新打开使用默认配置的 DM 仿真 RViz，即可加载 **Voice Subtitles**。
+自定义配置请 Add → `rviz_2d_overlay_plugins/TextOverlay`，Topic 设置为：
+
+```text
+/rebotarm/voice/subtitles
+```
+
+三个 `Overtake ... Properties` 保持 false。旧版左侧 Image 字幕面板应删除；
+当前话题类型为 `rviz_2d_overlay_msgs/msg/OverlayText`。
+如果语音 launch 没有启动字幕节点，可单独执行：
+
+```bash
+ros2 run rebotarm_voice rviz_subtitles
+```
+
+字幕节点只保留一份，支持 `show_subtitles:=false` 关闭自动启动。
+每段录音转写完成后更新文字，当前不是说话时逐字显示。
+
+### 8. MoveIt 规划与演示
+
+独立 MoveIt 仿真（自行启动模拟控制器；不要再启动前面的 fake 驱动）：
+
+```bash
+ros2 launch rebotarm_moveit_config demo.launch.py model:=dm
+```
+
+RS 改为 `model:=rs`。若接入真机，则用以下两个终端替代独立仿真：
+
+```bash
+# 终端一：真实驱动
+ros2 launch rebotarm_bringup driver.launch.py model:=dm channel:=/dev/ttyACM0
+```
+
+```bash
+# 终端二：连接现有驱动的 MoveIt
+ros2 launch rebotarm_moveit_config hardware.launch.py model:=dm arm_namespace:=rebotarm
+```
+
+规划环境准备好后，在新终端选择一个演示：
+
+```bash
+ros2 launch rebotarm_moveit_demos draw_square.launch.py model:=dm
+# 或：
+ros2 launch rebotarm_moveit_demos pick_place.launch.py model:=dm
+```
+
+RS 的驱动、MoveIt 和演示统一使用 `model:=rs`，驱动与 MoveIt 的 `arm_namespace` 保持一致。
+MoveIt 的安装与交互操作见本文原有 MoveIt 2 章节。
+
+### 9. RS MuJoCo 物理仿真（额外环境）
+
+此入口需要额外安装 MuJoCo、准备上游 RS 模型和 meshes，不等同于前面的 fake 仿真。
+仓库未附带上游资源，也没有部分旧文档所说的 `scripts/start_rs_sim.sh` 等脚本。
+请先将 `LAN-GER/reBot-B601-RS-for-mujoco_sim` 的配套资源准备到
+`third_party/reBot-B601-RS-for-mujoco_sim/`，检查场景 XML 的 include/mesh 相对路径。
+本工作空间采用 `--symlink-install`，也可显式指定能正确解析资源的 `model_path`。
+
+```bash
+ros2 launch rebotarm_mujoco_rs mujoco_rs.launch.py arm_namespace:=rebotarm_rs simulation_mode:=physics use_viewer:=true
+```
+
+默认启动任务接口、场景相机和颜色检测。只同步已有 ROS 关节状态、不开启任务工具：
+
+```bash
+ros2 launch rebotarm_mujoco_rs mujoco_rs.launch.py arm_namespace:=rebotarm_rs simulation_mode:=kinematic enable_task_tools:=false use_viewer:=true
+```
+
+后一种模式需要已有 `/rebotarm_rs/joint_states` 发布者。任务工具与其他驱动可能提供同名
+service/action，应按使用模式选择，避免重复启动。查看颜色检测：
+
+```bash
+ros2 topic echo /rebotarm_rs/vision/color_blocks/detections
+```
+
+接口说明见 [MuJoCo 模块](src/rebotarm_mujoco_rs/README.md)。
+
+### 10. MCP 与文本 Agent（可选）
+
+需要额外的 `fastmcp` 依赖，以及能调用 ROS 的 Python 解释器。以下使用系统解释器，
+显式覆盖 launch 内遗留的其他工作空间虚拟环境路径：
+
+```bash
+/usr/bin/python3 -m pip install --user --break-system-packages fastmcp
+ros2 launch rebotarm_agent rebotarm_mcp.launch.py python_executable:=/usr/bin/python3 arm_namespace:=rebotarm_rs motion_mode:=locked
+```
+
+MCP 地址为 `http://127.0.0.1:8081/mcp`。需先准备对应命名空间的驱动或仿真接口。
+`locked` 默认禁止运动工具；在准备好的安全仿真中可替换为 `motion_mode:=allow`。
+
+文本代理与本地 Whisper 独立，需要另行配置兼容的聊天模型服务。
+下面环境变量填入你实际使用的服务地址、模型名和密钥；云端聊天服务可能收费，
+这些配置不是本地语音功能的依赖：
+
+```bash
+export REBOTARM_LLM_BASE_URL='你的聊天模型服务地址'
+export REBOTARM_LLM_MODEL='你的模型名'
+export REBOTARM_LLM_API_KEY='你的聊天服务密钥'
+ros2 launch rebotarm_agent rebotarm_text_agent.launch.py python_executable:=/usr/bin/python3
+```
+
+如需网页 Dashboard，用以下命令替代上面的文本交互入口：
+
+```bash
+ros2 run rebotarm_agent rebotarm_text_agent --http-server --http-host 127.0.0.1 --http-port 8082
+```
+
+浏览器打开 `http://127.0.0.1:8082`。更多工具说明见 [Agent 模块](src/rebotarm_agent/README.md)。
+
+### 11. 结束与切换功能
+
+在对应长期运行节点的终端按 `Ctrl+C`。切换运动功能前，先停掉旧运动控制节点；
+驱动和 RViz 可按需要保留。修改代码或启动配置后重新构建相应包，并在每个终端
+重新 `source install/setup.bash`、重启对应节点。`Ctrl+C` 不是硬件急停。

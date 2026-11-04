@@ -14,8 +14,8 @@ def normalize(text):
                    if not c.isspace() and not unicodedata.category(c).startswith("P"))
 
 
-def parse_command(text, wake_word="机械臂"):
-    """Require a wake prefix and one complete allowed command; no substring match."""
+def parse_command(text, wake_word=""):
+    """Match one complete command with an optional configured wake prefix."""
     text, wake = normalize(text), normalize(wake_word)
     if wake:
         if not text.startswith(wake):

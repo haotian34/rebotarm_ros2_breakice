@@ -16,7 +16,7 @@ class VoiceControlNode(Node):
     def __init__(self):
         super().__init__('rebotarm_voice')
         defaults = dict(arm_namespace='rebotarm', execute_motion=False,
-                        wake_word='机械臂', record_seconds=4.0, sample_rate=16000,
+                        wake_word='', record_seconds=4.0, sample_rate=16000,
                         audio_device='', min_rms=0.01, language='zh',
                         model_size="base", model_device="cpu", compute_type="int8",
                         model_cache="", cpu_threads=4, max_command_age=25.0,

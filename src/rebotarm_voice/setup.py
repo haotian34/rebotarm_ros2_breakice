@@ -14,6 +14,7 @@ setup(
     description="Whisper speech recognition and named trajectory control",
     license="MIT",
     entry_points={"console_scripts": [
+        "rviz_subtitles = rebotarm_voice.rviz_subtitles:main",
         "download_model = rebotarm_voice.audio:download_model",
         "voice_control_node = rebotarm_voice.voice_control_node:main",
     ]},

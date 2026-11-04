@@ -25,10 +25,10 @@ def test_local_load_and_transcription(monkeypatch):
         assert kw['condition_on_previous_text'] is False
         assert kw['language'] == 'zh'
         # Real faster-whisper returns a lazy generator.
-        return (SimpleNamespace(text=t) for t in ['机械臂', '画圆']), None
+        return (SimpleNamespace(text=t) for t in ['画', '圆']), None
     model.transcribe.side_effect = transcribe
     for _ in range(2):
-        assert recognizer.record_and_transcribe(1, 16000, None, .01, 'zh') == '机械臂画圆'
+        assert recognizer.record_and_transcribe(1, 16000, None, .01, 'zh') == '画圆'
     factory.assert_called_once()
     sd.rec.return_value[:] = 0
     assert recognizer.record_and_transcribe(1, 16000, None, .01, 'zh') == ''
