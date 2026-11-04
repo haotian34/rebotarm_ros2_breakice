@@ -12,6 +12,8 @@ ros2 launch rebotarm_bringup fake_dm_bringup.launch.py   # 虚拟驱动 + RViz
 # 终端2
 ros2 launch rebotarm_dance dance.launch.py               # 等待触发
 # 或自动开演：ros2 launch rebotarm_dance dance.launch.py auto_start:=true
+# 默认以 1.1 倍速、60Hz 插值播放预计算轨迹；可调整：
+# ros2 launch rebotarm_dance dance.launch.py track_speed:=1.0
 
 # 终端3 触发
 ros2 topic pub --once /rebotarm/dance/start std_msgs/msg/Bool "{data: true}"

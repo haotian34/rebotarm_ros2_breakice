@@ -33,13 +33,15 @@ class DanceNode(Node):
         super().__init__("rebotarm_dance")
 
         self.declare_parameter("arm_namespace", "rebotarm")
-        self.declare_parameter("rate_hz", 30.0)
+        self.declare_parameter("rate_hz", 60.0)
         self.declare_parameter("auto_start", False)
+        self.declare_parameter("track_speed", 1.1)
         self.declare_parameter("config_path", "")
         self.declare_parameter("tracks_path", "")
 
         ns = self.get_parameter("arm_namespace").value.strip("/")
         self.rate_hz = float(self.get_parameter("rate_hz").value)
+        self.track_speed = max(0.1, float(self.get_parameter("track_speed").value))
         auto_start = bool(self.get_parameter("auto_start").value)
 
         share = get_package_share_directory("rebotarm_dance")
@@ -201,13 +203,21 @@ class DanceNode(Node):
             return progress >= 1.0
 
         if t == "track":
-            # 逐帧回放预计算轨迹（帧率与节点节拍一致），循环 times 次
+            # 按倍率回放并在相邻帧间插值，避免加速后出现跳帧和关节抖动
             tr = self.tracks[step["name"]]
             frames = tr["frames"]
-            idx = int(self.step_t * tr["rate"])
-            if idx >= len(frames) * step["times"]:
+            frame_pos = self.step_t * tr["rate"] * self.track_speed
+            total_frames = len(frames) * step["times"]
+            if frame_pos >= total_frames:
                 return True
-            q = frames[idx % len(frames)]
+            frame_index = int(frame_pos)
+            alpha = frame_pos - frame_index
+            q0 = frames[frame_index % len(frames)]
+            q1 = frames[(frame_index + 1) % len(frames)]
+            q = [
+                float(v0) + (float(v1) - float(v0)) * alpha
+                for v0, v1 in zip(q0, q1)
+            ]
             for j, v in zip(JOINTS, q):
                 self._command(j, self._clamp(j, float(v)))
             return False
@@ -252,7 +262,7 @@ class DanceNode(Node):
         msg = JointPosVelCmd()
         msg.stamp = self.get_clock().now().to_msg()
         msg.pos = float(pos)
-        msg.vlim = 1.5  # 速度上限（rad/s），仿真驱动按此限速跟踪
+        msg.vlim = 1.0  # 与预计算轨迹和仿真驱动限速保持一致
         self.joint_pubs[joint].publish(msg)
         self.current[joint] = float(pos)
 
