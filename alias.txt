@@ -1,0 +1,18 @@
+alias loadros='source /opt/ros/jazzy/setup.bash'
+alias loadarm='source ~/rebotarm_ros2/install/setup.bash'
+alias startsimulation='ros2 launch rebotarm_bringup fake_dm_bringup.launch.py use_rviz:=true'
+alias startvision='ros2 launch rebotarm_vision vision.launch.py'
+alias startgesture='ros2 launch rebotarm_gesture_actions gesture_actions.launch.py'
+
+dance() {
+    source /opt/ros/jazzy/setup.bash
+    source "$HOME/rebotarm_ros2/install/setup.bash"
+
+    if ! ros2 node list 2>/dev/null | grep -qx '/rebotarm_dance'; then
+        ros2 launch rebotarm_dance dance.launch.py &
+        sleep 3
+    fi
+    ros2 topic pub --once /rebotarm/dance/start \
+        std_msgs/msg/Bool "{data: true}"
+}
+
