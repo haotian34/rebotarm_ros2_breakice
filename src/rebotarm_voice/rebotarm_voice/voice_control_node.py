@@ -15,15 +15,20 @@ from .commands import parse_command
 class VoiceControlNode(Node):
     def __init__(self):
         super().__init__('rebotarm_voice')
-        defaults = dict(arm_namespace='rebotarm', execute_motion=False,
+        defaults = dict(arm_namespace='rebotarm', execute_motion=True,
                         wake_word='', record_seconds=4.0, sample_rate=16000,
                         audio_device='', min_rms=0.01, language='zh',
-                        model_size="base", model_device="cpu", compute_type="int8",
+                        model_size="small", model_device="cpu", compute_type="int8",
                         model_cache="", cpu_threads=4, max_command_age=25.0,
-                        cooldown_sec=2.0, status_timeout=3.0)
+                        cooldown_sec=2.0, status_timeout=3.0, fuzzy_matching=True,
+                        min_avg_logprob=-0.8, max_no_speech_prob=0.6)
         for key, value in defaults.items():
             self.declare_parameter(key, value)
         self.cfg = {k: self.get_parameter(k).value for k in defaults}
+        if not math.isfinite(self.cfg['min_avg_logprob']) or self.cfg['min_avg_logprob'] > 0:
+            raise ValueError('min_avg_logprob must be finite and <= 0')
+        if not 0 <= self.cfg['max_no_speech_prob'] <= 1:
+            raise ValueError('max_no_speech_prob must be between 0 and 1')
         for key in ('record_seconds', 'max_command_age',
                     'cooldown_sec', 'status_timeout'):
             if not math.isfinite(self.cfg[key]) or self.cfg[key] <= 0:
@@ -46,7 +51,8 @@ class VoiceControlNode(Node):
         self.create_service(Trigger, f'/{ns}/voice/listen', self._listen)
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.recognizer = LocalRecognizer(**{k: self.cfg[k] for k in (
-            'model_size', 'model_device', 'compute_type', 'model_cache', 'cpu_threads')})
+            'model_size', 'model_device', 'compute_type', 'model_cache', 'cpu_threads',
+            'min_avg_logprob', 'max_no_speech_prob')})
         self.loading = True
         self.model_ready = False
         self.future = self.pool.submit(self.recognizer.load)
@@ -130,8 +136,13 @@ class VoiceControlNode(Node):
         except Exception as exc:
             self._report(f'ERROR: recording/transcription failed ({type(exc).__name__}); check local model and microphone')
             return
-        self.transcript.publish(String(data=text))
-        track = parse_command(text, self.cfg['wake_word'])
+        self.transcript.publish(String(data=str(text)))
+        self.get_logger().info(f'TRANSCRIPT: {text!r}')
+        rejection_reason = getattr(text, 'rejection_reason', '')
+        if rejection_reason:
+            self._report(f'IGNORED: {rejection_reason}')
+            return
+        track = parse_command(text, self.cfg['wake_word'], self.cfg['fuzzy_matching'])
         if not track:
             self._report('IGNORED: silence or unsupported command')
         elif time.monotonic() - self.started_at > self.cfg['max_command_age']:

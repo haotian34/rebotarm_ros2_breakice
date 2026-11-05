@@ -1,0 +1,10 @@
+# rosidl_adapter in ROS Jazzy cannot read generated IDL tuples containing
+# non-ASCII build paths. Keep generated files in an ASCII-only directory.
+# Install output remains in this workspace's install/ directory.
+build:
+  build-base: /tmp/rebotarm_ros2_build
+  cmake-args:
+    - -DCMAKE_DISABLE_FIND_PACKAGE_Qt6=TRUE
+    - -DPython3_EXECUTABLE=/usr/bin/python3
+    - -DPYTHON_EXECUTABLE=/usr/bin/python3
+    - -DCMAKE_IGNORE_PREFIX_PATH=/home/syh/anaconda3

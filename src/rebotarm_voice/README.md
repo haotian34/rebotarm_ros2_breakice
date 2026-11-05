@@ -16,8 +16,8 @@ python3 -m pip install --user --break-system-packages 'faster-whisper>=1.1,<2' '
 source /opt/ros/jazzy/setup.bash  # Humble 用户改为 humble
 colcon build --symlink-install --packages-select rebotarm_voice rebotarm_gesture_actions
 source install/setup.bash
-# 首次联网下载 base 多语言模型（约 150 MB），之后可断网运行
-ros2 run rebotarm_voice download_model --model base
+# 首次联网下载 small 多语言模型，之后可断网运行
+ros2 run rebotarm_voice download_model --model small
 ```
 
 若终端默认进入 Conda，请先 `conda deactivate`，确认 `python3` 与 ROS 使用同一版本
@@ -43,11 +43,11 @@ ros2 launch rebotarm_voice voice_control.launch.py
 ```
 
 等待终端出现 `READY: local Whisper loaded` 后再触发录音。
-默认 `execute_motion:=false`，识别后仅报告 `DRY_RUN:<轨迹名>`。
-确认识别效果后，重启终端二中的 launch 开启执行：
+默认 `execute_motion:=true`，识别到有效口令后执行对应动作。
+如需仅测试识别效果，启动时关闭执行：
 
 ```bash
-ros2 launch rebotarm_voice voice_control.launch.py execute_motion:=true
+ros2 launch rebotarm_voice voice_control.launch.py execute_motion:=false
 ```
 
 终端三触发录音，然后在 4 秒录音窗口内说出口令：
@@ -70,7 +70,11 @@ ros2 topic echo /rebotarm/voice/status
 | 画爱心 / 画心 | heart_draw |
 | 画圆 / 画个圆 | paper_circle |
 
-空白和标点可省略。直接说命令即可，无需唤醒前缀；命令前可加“请”，其他附加内容、否定句和组合指令均拒绝。
+空白和标点可省略。直接说命令即可，无需唤醒前缀。默认启用有边界的自然口令匹配：
+“请帮我画一个爱心吧”“机械臂画个圆圈谢谢”“能不能帮我画个八字”“来打个拳”均可识别。
+支持少量明确的同音误识别，例如“划个园”“画爱星”。不是任意句子的最近似匹配，
+未收录的表达仍拒绝；否定句、组合指令、转述和歧义表达不执行。
+`fuzzy_matching: false` 恢复原来的完整口令模式。
 这不是自由对话控制器，也没有语音急停功能；语音识别受录音时长和本地推理速度影响。
 真机需先按原项目流程准备并使能驱动，使用硬件急停保障现场操作。
 
@@ -92,11 +96,32 @@ ros2 topic echo /rebotarm/voice/status
 
 ### 本地模型配置
 
-默认 `model_size: base`、`model_device: cpu`、`compute_type: int8`、`cpu_threads: 4`，
+### 嘈杂现场调试
+
+优先使用靠近说话人的定向/领夹麦克风，并通过 `audio_device` 明确选择输入，
+避免远处笔记本麦克风同时收进客户、音乐和围观者讲话。保持触发录音的交互；
+本模块不能识别谁在发出指令，VAD 也不能分离旁人说话。
+
+现有 `vad_filter=True` 过滤非语音，不是降噪。转写新增整句可信度过滤：
+任一片段的 `avg_logprob < min_avg_logprob`（默认 -0.8）或
+`no_speech_prob > max_no_speech_prob`（默认 0.6）时整句丢弃。
+这些是模型分数，不是准确率百分比；需用现场样本调参，收紧会增加拒识。
+不要通过无限放宽口令匹配补偿严重的转写错误。
+
+默认已使用 `small` 多语言模型。应对比现场识别率和 CPU 延迟；
+如需退回旧模型，可用自定义配置设置 `model_size: base`。
+先保持 `execute_motion:=false`，收集实际转写和误拒/误接受案例，再调整别名与阈值。
+低可信度拒识时 transcript 仍发布原始识别文字供 RViz 显示，status 为 IGNORED，
+不会执行片段中的动作。日志打印 TRANSCRIPT 和拒识原因，可区分音量过低、
+VAD 未检出语音、模型可信度不足和口令不匹配。
+
+### 模型与设备
+
+默认 `model_size: small`、`model_device: cpu`、`compute_type: int8`、`cpu_threads: 4`，
 无需 CUDA。模型只加载一次，后续每次录音复用。
 
-需要尝试更大模型时，先执行 `ros2 run rebotarm_voice download_model --model small`，
-再将自定义 YAML 中的 `model_size` 改为 `small`。更大模型通常需要更多内存和推理时间。
+需要尝试更大模型时，先执行 `ros2 run rebotarm_voice download_model --model medium`，
+再将自定义 YAML 中的 `model_size` 改为 `medium`。更大模型通常需要更多内存和推理时间。
 也可以将 `model_size` 设为已经下载好的 CTranslate2 Whisper 模型目录。
 `model_cache` 可配置缓存目录；下载时需对应传入 `--cache-dir /绝对路径`。
 模型缺失时节点报告加载失败，不接受录音；先下载并重启节点。

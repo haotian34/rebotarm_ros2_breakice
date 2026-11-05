@@ -11,7 +11,7 @@ def generate_launch_description():
     ns = LaunchConfiguration('arm_namespace')
     return LaunchDescription([
         DeclareLaunchArgument('arm_namespace', default_value='rebotarm'),
-        DeclareLaunchArgument('execute_motion', default_value='false'),
+        DeclareLaunchArgument('execute_motion', default_value='true'),
         DeclareLaunchArgument('show_subtitles', default_value='true'),
         DeclareLaunchArgument('start_player', default_value='true'),
         DeclareLaunchArgument('config', default_value=PathJoinSubstitution([
