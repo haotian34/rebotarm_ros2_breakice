@@ -17,6 +17,10 @@ def _locked(method):
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
         with self._cmd_lock:
+            if getattr(self, "_safety_latched", False) and method.__name__ not in (
+                "stop_motion", "hold_current_position", "disable", "set_state_machine",
+            ):
+                raise RuntimeError("safety stop latched; restart controller after inspection")
             return method(self, *args, **kwargs)
 
     return wrapper
@@ -32,6 +36,9 @@ class HardwareManager:
         channel: str = "",
     ) -> None:
         self._cmd_lock = threading.RLock()
+        self._safety_latched = False
+        self._safety_generation = 0
+        self._safety_worker = None
         hardware_config_path, hardware_data = resolve_hardware_config(
             hardware_config,
             model,
@@ -168,6 +175,8 @@ class HardwareManager:
 
     @_locked
     def set_state_machine(self, state: str) -> None:
+        if self._safety_latched:
+            return  # Late action callbacks must not clear the safety state.
         if state not in (
             "IDLE",
             "TRAJ_RUNNING",
@@ -207,6 +216,13 @@ class HardwareManager:
     def shutdown(self, disable_after_safe_home: bool = True) -> None:
         if not self._connected:
             return
+        if self._safety_latched:
+            self.safety_stop()
+            self._robot.stop_control_loop()
+            self._robot.disable_all()
+            self._robot.disconnect()
+            self._connected = False
+            return
         try:
             self.safe_home()
             with self._cmd_lock:
@@ -243,7 +259,7 @@ class HardwareManager:
     @_locked
     def hold_current_position(self) -> np.ndarray:
         current = self.get_joint_positions(request=True).copy()
-        if self._state_machine != "SAFE_HOMING":
+        if not self._safety_latched and self._state_machine != "SAFE_HOMING":
             self._endpos_ctrl._q_target[:] = current
             self._endpos_ctrl._qd_target[:] = 0.0
         return current
@@ -282,6 +298,9 @@ class HardwareManager:
 
     @_locked
     def disable(self) -> None:
+        if self._safety_latched:
+            self._safety_generation += 1
+            self._state_machine = "SAFETY_STOPPED"
         if self._gravity_comp_active:
             raise RuntimeError("stop gravity compensation before disable")
         self._control_output_enabled = False
@@ -293,39 +312,14 @@ class HardwareManager:
         self.set_state_machine("IDLE")
 
     def safe_home(self) -> None:
-        with self._cmd_lock:
-            self.stop_motion()
-            self.set_state_machine("IDLE")
-            if self._gravity_comp_active:
-                if self._arm_control_mode == "mit" and self.control_loop_active:
-                    hold_target = (
-                        self._gravity_comp_q_last.copy()
-                        if self._gravity_comp_q_last is not None
-                        else self._arm_group.get_positions(request_feedback=False).copy()
-                    )
-                    self._arm_group._mit_kp = self._arm_mit_kp.copy()
-                    self._arm_group._mit_kd = self._arm_mit_kd.copy()
-                    self._endpos_ctrl._q_target[:] = hold_target
-                    self._endpos_ctrl._qd_target[:] = 0.0
-                    self._endpos_ctrl._running = True
-                    self._control_output_enabled = True
-                    self._send_endpos_hold_once()
-                    self._robot._ctrl_fn = self._endpos_loop_cb
-                    self._gravity_comp_active = False
-                    self._gravity_comp_q_last = None
-                else:
-                    self.stop_gravity_compensation()
-            else:
-                self.start_endpos_control()
-            self.set_state_machine("SAFE_HOMING")
-            self._homing_thread = threading.get_ident()
-        try:
-            if self.has_gripper:
-                self.set_gripper_position(self.gripper_close_position)
-            self._endpos_ctrl.safe_home()
-        finally:
-            self._homing_thread = None
-            self.set_state_machine("IDLE")
+        self.stop_and_home()
+        generation = self._safety_generation
+        worker = self._safety_worker
+        if worker is not None:
+            worker.join()
+        if (generation != self._safety_generation
+                or self._state_machine != "SAFETY_STOPPED"):
+            raise RuntimeError("safety home interrupted or failed")
 
     @_locked
     def set_zero(self, joint_name: str = "") -> bool:
@@ -415,6 +409,7 @@ class HardwareManager:
         self.start_endpos_control()
         self.set_state_machine("TRAJ_RUNNING")
 
+    @_locked
     def move_to_pose_traj(
         self, x, y, z, roll, pitch, yaw, duration: float
     ) -> bool:
@@ -742,6 +737,8 @@ class HardwareManager:
         self._endpos_ctrl._stop_send.set()
         if self._endpos_ctrl._send_thread is not None:
             self._endpos_ctrl._send_thread.join(timeout=5.0)
+            if self._endpos_ctrl._send_thread.is_alive():
+                raise RuntimeError("trajectory sender did not stop")
         self._endpos_ctrl._moving = False
         self._endpos_ctrl._stop_send.clear()
 
@@ -758,6 +755,81 @@ class HardwareManager:
             self._endpos_ctrl._loop_cb(robot, 0.0)
         finally:
             self._cmd_lock.release()
+
+    def safety_stop(self) -> None:
+        """Latch out command sources and replace the current output with a hold."""
+        with self._cmd_lock:
+            self._safety_latched = True
+            self._safety_generation += 1
+            self._state_machine = "SAFETY_STOPPED"
+            self._control_output_enabled = False
+            try:
+                self.stop_motion()
+                self._robot.stop_control_loop()
+                self._gravity_comp_active = False
+                self._gravity_comp_q_last = None
+                q = self.get_joint_positions(request=True).copy()
+                if not np.all(np.isfinite(q)):
+                    raise RuntimeError("invalid joint feedback")
+                if not self._enabled:
+                    raise RuntimeError("arm disabled; refusing automatic re-enable")
+                if self.has_gripper:
+                    self._gripper_target_position = self.get_gripper_state()[0]
+                    self._endpos_ctrl.set_gripper_target(self._gripper_target_position)
+                self._start_endpos_loop(q)
+                self._send_endpos_hold_once()
+            except Exception:
+                self._control_output_enabled = False
+                self._robot.stop_control_loop()
+                self._robot.disable_all()
+                self._enabled = False
+                self._state_machine = "SAFETY_FAULT"
+                raise
+
+    def stop_and_home(self, max_velocity: float = 0.1) -> None:
+        """Stop immediately, then stream a bounded, interruptible zero trajectory."""
+        if not math.isfinite(max_velocity) or not 0 < max_velocity <= 0.1:
+            raise ValueError("safety home velocity must be in (0, 0.1] rad/s")
+        with self._cmd_lock:
+            if self._safety_latched:
+                self.safety_stop()
+                raise RuntimeError("already latched; stopped without starting another home")
+            if self._state_machine == "SAFE_HOMING":
+                raise RuntimeError("SDK safe_home active; use hardware emergency stop")
+            self.safety_stop()
+            generation = self._safety_generation
+            q0 = self._endpos_ctrl._q_target.copy()
+            duration = max(3.0, float(np.max(np.abs(q0))) * 1.875 / max_velocity)
+            self._state_machine = "SAFETY_HOMING"
+            self._safety_worker = threading.Thread(
+                target=self._safety_home_loop, args=(generation, q0, duration),
+                daemon=True,
+            )
+            self._safety_worker.start()
+
+    def _safety_home_loop(self, generation, q0, duration) -> None:
+        start = time.monotonic()
+        try:
+            while True:
+                with self._cmd_lock:
+                    if generation != self._safety_generation:
+                        return
+                    ratio = min(1.0, (time.monotonic() - start) / duration)
+                    blend = 10 * ratio**3 - 15 * ratio**4 + 6 * ratio**5
+                    actual = self.get_joint_positions(request=True)
+                    if not np.all(np.isfinite(actual)) or np.max(
+                        np.abs(actual - self._endpos_ctrl._q_target)
+                    ) > 0.35:
+                        raise RuntimeError("invalid feedback or excessive home tracking error")
+                    self._endpos_ctrl._q_target[:] = q0 * (1.0 - blend)
+                    self._endpos_ctrl._qd_target[:] = 0.0
+                    if ratio >= 1.0:
+                        self._state_machine = "SAFETY_STOPPED"
+                        return
+                time.sleep(0.02)
+        except Exception as exc:
+            self._error_codes.append(f"safety home failed: {exc}")
+            self.safety_stop()
 
     def _send_endpos_hold_once(self) -> None:
         if self._arm_control_mode == "mit":

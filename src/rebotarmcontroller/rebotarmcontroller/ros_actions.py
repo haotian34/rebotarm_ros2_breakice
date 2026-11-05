@@ -45,11 +45,11 @@ class ArmActions:
 
     def arm_goal_callback(self, _goal_request):
         return self._gate_goal(
-            ("TRAJ_RUNNING", "GRAVITY_COMP", "SAFE_HOMING"), "arm motion"
+            ("TRAJ_RUNNING", "GRAVITY_COMP", "SAFE_HOMING", "SAFETY_STOPPED", "SAFETY_HOMING", "SAFETY_FAULT"), "arm motion"
         )
 
     def gripper_goal_callback(self, _goal_request):
-        return self._gate_goal(("GRAVITY_COMP", "SAFE_HOMING"), "gripper")
+        return self._gate_goal(("GRAVITY_COMP", "SAFE_HOMING", "SAFETY_STOPPED", "SAFETY_HOMING", "SAFETY_FAULT"), "gripper")
 
     def _gate_goal(self, blocked, label):
         state = self._hardware.state_machine
@@ -95,7 +95,7 @@ class ArmActions:
 
         deadline = time.monotonic() + max(float(goal.duration), 0.0) + 2.0
         while self._hardware.motion_active():
-            if self._hardware.state_machine == "SAFE_HOMING":
+            if self._hardware.state_machine in ("SAFE_HOMING", "SAFETY_STOPPED", "SAFETY_HOMING", "SAFETY_FAULT"):
                 self._hardware.stop_motion()
                 break
             if goal_handle.is_cancel_requested:
@@ -112,7 +112,7 @@ class ArmActions:
                 )
             time.sleep(0.02)
 
-        if self._hardware.state_machine == "SAFE_HOMING":
+        if self._hardware.state_machine in ("SAFE_HOMING", "SAFETY_STOPPED", "SAFETY_HOMING", "SAFETY_FAULT"):
             return self._fail_move_to_pose(
                 goal_handle, result, "move_to_pose preempted by safe_home"
             )
@@ -179,7 +179,7 @@ class ArmActions:
                 desired_velocities = np.zeros_like(q1)
 
                 while True:
-                    if self._hardware.state_machine == "SAFE_HOMING":
+                    if self._hardware.state_machine in ("SAFE_HOMING", "SAFETY_STOPPED", "SAFETY_HOMING", "SAFETY_FAULT"):
                         goal_handle.abort()
                         result.error_code = (
                             FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED

@@ -31,4 +31,5 @@
   <export>
     <build_type>ament_cmake</build_type>
   </export>
+  <exec_depend>rebotarm_rviz_panel</exec_depend>
 </package>

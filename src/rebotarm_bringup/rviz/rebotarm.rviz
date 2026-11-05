@@ -1,5 +1,7 @@
 Panels:
-  []
+  - Arm Namespace: rebotarm
+    Class: rebotarm_rviz_panel/SafetyPanel
+    Name: Arm Safety
 Visualization Manager:
   Class: ""
   Displays:
@@ -217,13 +219,18 @@ Visualization Manager:
       Update Interval: 0
       Value: true
       Visual Enabled: true
-    - Class: rviz_2d_overlay_plugins/TextOverlay
+    - Align Bottom: false
+      Background Alpha: 0.800000011920929
+      Background Color: 0; 0; 0
+      Class: rviz_2d_overlay_plugins/TextOverlay
       Enabled: true
+      Foreground Alpha: 0.800000011920929
+      Foreground Color: 25; 255; 240
+      Invert Shadow: false
       Name: Voice Subtitles
-      Overtake Position Properties: false
-      Overtake FG Color Properties: false
       Overtake BG Color Properties: false
-      Align Bottom: false
+      Overtake FG Color Properties: false
+      Overtake Position Properties: false
       Topic:
         Depth: 1
         Durability Policy: Volatile
@@ -231,6 +238,15 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /rebotarm/voice/subtitles
       Value: true
+      font: DejaVu Sans Mono
+      height: 128
+      hor_alignment: left
+      hor_dist: 0
+      line width: 2
+      text size: 12
+      ver_alignment: top
+      ver_dist: 0
+      width: 128
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -270,10 +286,12 @@ Visualization Manager:
       Yaw: 5.868178367614746
     Saved: ~
 Window Geometry:
+  Arm Safety:
+    collapsed: false
   Height: 575
   Hide Left Dock: false
   Hide Right Dock: false
-  QMainWindow State: 000000ff00000000fd000000000000032f000001e100000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd00000001000000000000010b000001e1fc0200000001fb0000001400410072006d0020005300610066006500740079010000003f000001e10000017d00ffffff0000021e000001e100000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Width: 815
-  X: 866
-  Y: 702
+  X: 469
+  Y: 449

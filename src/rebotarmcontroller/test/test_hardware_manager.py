@@ -59,3 +59,45 @@ class GripperPositionLimitTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SafetyLatchTest(unittest.TestCase):
+    def setUp(self):
+        import threading
+        from types import SimpleNamespace
+        import numpy as np
+        self.hardware = object.__new__(HardwareManager)
+        h = self.hardware
+        h._cmd_lock = threading.RLock()
+        h._safety_latched = True
+        h._safety_generation = 2
+        h._state_machine = 'SAFETY_HOMING'
+        h._endpos_ctrl = SimpleNamespace(_q_target=np.array([0.5]), _qd_target=np.zeros(1))
+        h.get_joint_positions = lambda **kwargs: np.array([0.2])
+
+    def test_motion_commands_rejected_after_stop(self):
+        h = self.hardware
+        for command, args in ((h.enable, ()), (h.set_joint_position_target, ([1.0],)),
+                              (h.send_joint_pos_vel_cmd, ('joint1', 1.0, 0.5)),
+                              (h.set_gripper_target, (0.0,)),
+                              (h.start_gravity_compensation, ())):
+            with self.subTest(command=command.__name__):
+                with self.assertRaises(RuntimeError):
+                    command(*args)
+
+    def test_late_action_cleanup_cannot_clear_latch_or_target(self):
+        h = self.hardware
+        h.set_state_machine('IDLE')
+        h.hold_current_position()
+        self.assertEqual(h.state_machine, 'SAFETY_HOMING')
+        self.assertEqual(h._endpos_ctrl._q_target[0], 0.5)
+
+    def test_old_home_worker_cannot_write_after_second_stop(self):
+        import numpy as np
+        self.hardware._safety_home_loop(1, np.array([1.0]), 3.0)
+        self.assertEqual(self.hardware._endpos_ctrl._q_target[0], 0.5)
+
+    def test_unsafe_velocity_rejected(self):
+        for velocity in (0, -1, 0.2, math.inf, math.nan):
+            with self.assertRaises(ValueError):
+                self.hardware.stop_and_home(velocity)

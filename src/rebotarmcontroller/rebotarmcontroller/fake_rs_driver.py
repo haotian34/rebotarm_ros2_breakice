@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import hashlib
+import socket
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
@@ -47,6 +49,22 @@ class FakeRsDriver(Node):
         self.declare_parameter("start_enabled", True)
 
         self.namespace = str(self.get_parameter("arm_namespace").value).strip("/")
+        # A ROS service name is not exclusive: requests to duplicate servers can
+        # reach either instance. Reserve this domain/namespace before advertising
+        # any state or command interfaces. Abstract sockets release on process exit.
+        self._instance_guard = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        key = f"{self.context.get_domain_id()}:{self.namespace}".encode()
+        address = "\0rebotarm_fake_" + hashlib.sha256(key).hexdigest()
+        try:
+            self._instance_guard.bind(address)
+        except OSError as exc:
+            self._instance_guard.close()
+            super().destroy_node()
+            raise RuntimeError(
+                f"Refusing duplicate fake driver for /{self.namespace}: "
+                "another local instance owns this ROS domain/namespace. "
+                "Close the previous simulation launch first."
+            ) from exc
         self.joint_names = [f"joint{index}" for index in range(1, 7)]
         self.max_joint_speed = max(
             0.01, float(self.get_parameter("max_joint_speed").value)
@@ -81,6 +99,7 @@ class FakeRsDriver(Node):
         self.gripper_target = 0.0
         self.gripper_velocity = 0.0
         self.state_machine = "IDLE"
+        self.safety_latched = False
         self.last_time = self.get_clock().now()
 
         self.joint_state_pub = self.create_publisher(
@@ -149,6 +168,8 @@ class FakeRsDriver(Node):
         )
 
         self._service_handles = [
+            self.create_service(Trigger, f"/{self.namespace}/safety_stop", self._safety_stop),
+            self.create_service(Trigger, f"/{self.namespace}/stop_and_home", self._stop_and_home),
             self.create_service(Trigger, f"/{self.namespace}/enable", self._enable),
             self.create_service(Trigger, f"/{self.namespace}/disable", self._disable),
             self.create_service(Trigger, f"/{self.namespace}/safe_home", self._safe_home),
@@ -206,7 +227,7 @@ class FakeRsDriver(Node):
         return callback
 
     def _set_joint_target(self, index: int, target: float) -> None:
-        if not self.enabled or self.state_machine == "GRAVITY_COMP":
+        if self.safety_latched or not self.enabled or self.state_machine == "GRAVITY_COMP":
             return
         lower, upper = self.joint_limits[index]
         self.targets[index] = self._clamp(float(target), lower, upper)
@@ -220,7 +241,7 @@ class FakeRsDriver(Node):
         self._set_gripper_target(msg.pos)
 
     def _set_gripper_target(self, target: float) -> None:
-        if not self.enabled or self.state_machine == "GRAVITY_COMP":
+        if self.safety_latched or not self.enabled or self.state_machine == "GRAVITY_COMP":
             return
         self.gripper_target = self._clamp(
             float(target), 0.0, self.gripper_open_position
@@ -228,7 +249,36 @@ class FakeRsDriver(Node):
         self.state_machine = "LOWLEVEL_STREAMING"
         self.publish_status()
 
+    def _safety_stop(self, _request, response):
+        self.safety_latched = True
+        self.targets = list(self.positions)
+        self.velocities = [0.0] * 6
+        self.gripper_target = self.gripper_position
+        self.gripper_velocity = 0.0
+        self.state_machine = "SAFETY_STOPPED"
+        response.success = True
+        response.message = "stopped; safety latch active"
+        self.publish_status()
+        return response
+
+    def _stop_and_home(self, request, response):
+        already_latched = self.safety_latched
+        self._safety_stop(request, response)
+        if already_latched or not self.enabled:
+            response.success = False
+            response.message = "stopped; already latched or disabled; home not started"
+            return response
+        self.targets = [0.0] * 6
+        self.state_machine = "SAFETY_HOMING"
+        response.message = "stopped; slow home started; safety latch active"
+        self.publish_status()
+        return response
+
     def _enable(self, _request, response):
+        if self.safety_latched:
+            response.success = False
+            response.message = "safety stop latched; restart driver after inspection"
+            return response
         self.enabled = True
         self.state_machine = "IDLE"
         response.success = True
@@ -237,14 +287,20 @@ class FakeRsDriver(Node):
         return response
 
     def _disable(self, _request, response):
+        self.targets = list(self.positions)
+        self.gripper_target = self.gripper_position
         self.enabled = False
-        self.state_machine = "IDLE"
+        self.state_machine = "SAFETY_STOPPED" if self.safety_latched else "IDLE"
         response.success = True
         response.message = "RS fake driver disabled"
         self.publish_status()
         return response
 
     def _safe_home(self, _request, response):
+        if self.safety_latched:
+            response.success = False
+            response.message = "safety stop latched; restart driver after inspection"
+            return response
         self.targets = [0.0] * 6
         self.gripper_target = 0.0
         self.state_machine = "LOWLEVEL_STREAMING"
@@ -254,6 +310,10 @@ class FakeRsDriver(Node):
         return response
 
     def _start_gravity_compensation(self, _request, response):
+        if self.safety_latched:
+            response.success = False
+            response.message = "safety stop latched; restart driver after inspection"
+            return response
         self.targets = list(self.positions)
         self.gripper_target = self.gripper_position
         self.state_machine = "GRAVITY_COMP"
@@ -263,6 +323,10 @@ class FakeRsDriver(Node):
         return response
 
     def _stop_gravity_compensation(self, _request, response):
+        if self.safety_latched:
+            response.success = False
+            response.message = "safety stop latched; restart driver after inspection"
+            return response
         self.state_machine = "IDLE"
         response.success = True
         response.message = "RS fake gravity compensation stopped"
@@ -276,21 +340,21 @@ class FakeRsDriver(Node):
 
     def _set_gripper(self, request, response):
         self._set_gripper_target(request.position)
-        response.success = self.enabled
+        response.success = self.enabled and not self.safety_latched
         response.reached_position = float(self.gripper_target)
         return response
 
     def _open_gripper(self, request, response):
         target = request.position if request.position != 0.0 else self.gripper_open_position
         self._set_gripper_target(target)
-        response.success = self.enabled
+        response.success = self.enabled and not self.safety_latched
         response.reached_position = float(self.gripper_target)
         response.message = "RS fake gripper open accepted"
         return response
 
     def _close_gripper(self, request, response):
         self._set_gripper_target(request.position)
-        response.success = self.enabled
+        response.success = self.enabled and not self.safety_latched
         response.reached_position = float(self.gripper_target)
         response.message = "RS fake gripper close accepted"
         return response
@@ -300,11 +364,14 @@ class FakeRsDriver(Node):
         dt = max((now - self.last_time).nanoseconds / 1e9, 0.001)
         self.last_time = now
         moving = False
+        speed = min(self.max_joint_speed, 0.1) if self.state_machine == "SAFETY_HOMING" else self.max_joint_speed
+        if not self.enabled:
+            speed = 0.0
 
         for index in range(6):
             before = self.positions[index]
             self.positions[index] = self._step_towards(
-                before, self.targets[index], self.max_joint_speed * dt
+                before, self.targets[index], speed * dt
             )
             self.velocities[index] = (self.positions[index] - before) / dt
             moving = moving or abs(self.targets[index] - self.positions[index]) > 0.002
@@ -318,6 +385,12 @@ class FakeRsDriver(Node):
         self.gripper_velocity = (self.gripper_position - before_gripper) / dt
         moving = moving or abs(self.gripper_target - self.gripper_position) > 0.01
 
+        if self.state_machine == "SAFETY_HOMING" and all(
+            abs(target - position) < 1e-9
+            for target, position in zip(self.targets, self.positions)
+        ):
+            self.state_machine = "SAFETY_STOPPED"
+            self.publish_status()
         if not moving and self.state_machine == "LOWLEVEL_STREAMING":
             self.state_machine = "IDLE"
             self.publish_status()
@@ -375,6 +448,12 @@ class FakeRsDriver(Node):
         msg.per_joint_status_code = [0] * 6
         msg.error_codes = []
         self.status_pub.publish(msg)
+
+    def destroy_node(self):
+        try:
+            return super().destroy_node()
+        finally:
+            self._instance_guard.close()
 
     @staticmethod
     def _step_towards(current: float, target: float, max_step: float) -> float:

@@ -129,6 +129,7 @@ def generate_launch_description():
                 name="rviz2",
                 output="screen",
                 arguments=["-d", rviz_config],
+                additional_env={"REBOTARM_SAFETY_NAMESPACE": arm_namespace},
                 condition=IfCondition(use_rviz),
             ),
         ]

@@ -17,6 +17,8 @@ class ArmServices:
         self._hardware = hardware
 
         services = (
+            (Trigger, "safety_stop", self.safety_stop, node.reentrant_group),
+            (Trigger, "stop_and_home", self.stop_and_home, node.reentrant_group),
             (Trigger, "enable", self.enable, node.slow_group),
             (Trigger, "disable", self.disable, node.slow_group),
             (Trigger, "safe_home", self.safe_home, node.slow_group),
@@ -56,6 +58,13 @@ class ArmServices:
             response.message = str(exc)
         self._node.publish_arm_status(read_hardware=read_hardware)
         return response
+
+    def safety_stop(self, _request, response):
+        return self._run(response, self._hardware.safety_stop, "stopped; safety latch active")
+
+    def stop_and_home(self, _request, response):
+        return self._run(response, self._hardware.stop_and_home,
+                         "stopped; slow home started; safety latch active")
 
     def enable(self, _request, response):
         return self._run(response, self._hardware.enable, "enabled")

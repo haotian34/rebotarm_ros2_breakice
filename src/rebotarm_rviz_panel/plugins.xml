@@ -1,0 +1,5 @@
+<library path="rebotarm_rviz_panel">
+  <class name="rebotarm_rviz_panel/SafetyPanel" type="rebotarm_rviz_panel::SafetyPanel" base_class_type="rviz_common::Panel">
+    <description>Stop and slow home controls for reBotArm.</description>
+  </class>
+</library>

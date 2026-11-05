@@ -13,15 +13,18 @@ def generate_launch_description():
         DeclareLaunchArgument('arm_namespace', default_value='rebotarm'),
         DeclareLaunchArgument('execute_motion', default_value='true'),
         DeclareLaunchArgument('show_subtitles', default_value='true'),
+        DeclareLaunchArgument('subtitle_timeout', default_value='8.0'),
         DeclareLaunchArgument('start_player', default_value='true'),
         DeclareLaunchArgument('config', default_value=PathJoinSubstitution([
             FindPackageShare('rebotarm_voice'), 'config', 'voice.yaml'])),
         Node(package='rebotarm_gesture_actions', executable='trajectory_player_node',
              output='screen', condition=IfCondition(LaunchConfiguration('start_player')),
-             parameters=[{'arm_namespace': ns}]),
+             parameters=[{'arm_namespace': ns, 'subtitle_timeout': ParameterValue(
+                 LaunchConfiguration('subtitle_timeout'), value_type=float)}]),
         Node(package='rebotarm_voice', executable='rviz_subtitles',
              output='screen', condition=IfCondition(LaunchConfiguration('show_subtitles')),
-             parameters=[{'arm_namespace': ns}]),
+             parameters=[{'arm_namespace': ns, 'subtitle_timeout': ParameterValue(
+                 LaunchConfiguration('subtitle_timeout'), value_type=float)}]),
         Node(package='rebotarm_voice', executable='voice_control_node',
              name='rebotarm_voice', output='screen',
              parameters=[LaunchConfiguration('config'), {

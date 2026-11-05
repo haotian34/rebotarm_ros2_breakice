@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>rebotarm_rviz_panel</name><version>0.1.0</version>
+  <description>RViz arm stop and slow home panel.</description>
+  <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rviz_common</depend><depend>pluginlib</depend><depend>rclcpp</depend>
+  <depend>std_srvs</depend><depend>rebotarm_msgs</depend>
+  <build_depend>qtbase5-dev</build_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

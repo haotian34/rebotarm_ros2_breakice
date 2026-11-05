@@ -1210,3 +1210,45 @@ ros2 run rebotarm_agent rebotarm_text_agent --http-server --http-host 127.0.0.1 
 在对应长期运行节点的终端按 `Ctrl+C`。切换运动功能前，先停掉旧运动控制节点；
 驱动和 RViz 可按需要保留。修改代码或启动配置后重新构建相应包，并在每个终端
 重新 `source install/setup.bash`、重启对应节点。`Ctrl+C` 不是硬件急停。
+
+
+### 一键停止与缓慢复位（真机控制器）
+
+构建并加载环境后打开按钮窗口（需要 `python3-tk`）：
+
+```bash
+colcon build --packages-select rebotarmcontroller
+source install/setup.bash
+ros2 run rebotarmcontroller SafetyPanel
+```
+
+点击“停止并缓慢复位”会打断动作、保持当前位置，然后以五次平滑曲线回到各关节零位，目标速度不超过 0.1 rad/s。夹爪保持触发时的位置。点击“仅停止”或在窗口获得焦点时按空格，可中断回零并保持当前位置。
+
+也可直接调用：
+
+```bash
+ros2 service call /rebotarm/stop_and_home std_srvs/srv/Trigger '{}'
+ros2 service call /rebotarm/safety_stop std_srvs/srv/Trigger '{}'
+```
+
+触发后普通运动指令被锁止，复位完成仍保持锁止和电机位置保持。再次点击复位只停止，不会重新启动回零。现场检查后重启控制器才能恢复控制。现有 `safe_home` 服务也使用此限速流程。关闭已锁止的控制器时直接失能，不再自动运动。
+
+这是软件停止，不能替代独立硬件急停；通信失效时软件无法保证停车。自动回零没有避障，请预先保证回零路径和零位周围无人、无障碍物。0.1 rad/s 为目标轨迹限速，不是经认证的实际速度限制。服务成功表示已开始处理，需通过状态主题确认复位过程；尚需在隔离区域进行真机验收。
+
+
+### RViz 内嵌停止面板
+
+默认 RViz 布局现在包含 **Arm Safety** 停靠面板，无需单独打开 Tk 窗口。构建并重新加载环境后启动 DM 仿真：
+
+```bash
+colcon build --packages-select rebotarm_rviz_panel rebotarmcontroller rebotarm_bringup rebotarm_moveit_config
+source install/setup.bash
+ros2 launch rebotarm_bringup fake_dm_bringup.launch.py
+```
+
+RS 仿真使用 `fake_rs_bringup.launch.py use_rviz:=true`。面板随启动文件自动选择机械臂命名空间，也可在面板中修改后按 Enter。点击红色“仅停止 / 中断复位”保持当前位置；点击“停止并缓慢复位”以不超过 0.1 rad/s 回零。状态栏显示 `SAFETY_HOMING`（复位中）或 `SAFETY_STOPPED`（停止并锁止）。再次点击复位只会停止。夹爪保持原位置，普通指令被锁止，检查后重启驱动恢复控制。
+
+旧 RViz 布局可通过 **Panels → Add New Panel → rebotarm_rviz_panel/SafetyPanel** 添加面板。停止服务未启动时按钮禁用；底层仅有 MoveIt `ros2_control` 的 demo 不提供这两个服务，需要使用上述 fake bringup 或真机控制器。服务响应只表示请求被受理，状态栏用于查看后续状态。软件按钮不替代硬件急停，自动回零路径不带避障。
+
+
+仿真生命周期：关闭上述 DM/RS 仿真的 RViz 窗口会同时退出该次 launch 的驱动与状态发布节点；驱动异常退出也会结束整组进程。相同 ROS 域、相同机械臂命名空间在本机只允许一个新版仿真驱动，重复启动会报错退出，避免不同状态交替显示以及同名停止服务由不同驱动接收。升级前遗留的旧进程不具备互斥保护，需先在旧仿真终端 Ctrl+C 完整退出再启动。跨机器、旧版本驱动或其他状态发布者仍需单独检查。

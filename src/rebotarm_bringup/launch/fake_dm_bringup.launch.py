@@ -1,6 +1,8 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandler
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -27,6 +29,42 @@ def generate_launch_description():
         Command(["python3 ", rviz_urdf_compat, " ", urdf_file]), value_type=str
     )
 
+    driver_node = Node(
+        package="rebotarmcontroller",
+        executable="FakeRsDriver",
+        name="fake_rebotarm_dm_driver",
+        output="screen",
+        parameters=[
+            {
+                "arm_namespace": arm_namespace,
+                "joint_state_rate": joint_state_rate,
+                "max_joint_speed": max_joint_speed,
+                "max_gripper_speed": max_gripper_speed,
+                "start_enabled": ParameterValue(start_enabled, value_type=bool),
+                "gripper_visual_joint_names": ["finger_left"],
+                # DM URDF 限位：joint2/joint3 为负向范围
+                "joint_limits": [
+                    -2.8, 2.8,
+                    -3.14, 0.0,
+                    -3.14, 0.0,
+                    -1.87, 1.57,
+                    -1.57, 1.57,
+                    -3.14, 3.14,
+                ],
+            }
+        ],
+    )
+
+    rviz_node = Node(
+        package="rviz2",
+        executable="rviz2",
+        name="fake_dm_rviz2",
+        output="screen",
+        arguments=["-d", rviz_config],
+        additional_env={"REBOTARM_SAFETY_NAMESPACE": arm_namespace},
+        condition=IfCondition(use_rviz),
+    )
+
     return LaunchDescription(
         [
             # 与真实 DM bringup 保持一致，方便仿真代码无缝迁移到真机
@@ -36,31 +74,15 @@ def generate_launch_description():
             DeclareLaunchArgument("max_gripper_speed", default_value="2.0"),
             DeclareLaunchArgument("start_enabled", default_value="true"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
-            Node(
-                package="rebotarmcontroller",
-                executable="FakeRsDriver",
-                name="fake_rebotarm_dm_driver",
-                output="screen",
-                parameters=[
-                    {
-                        "arm_namespace": arm_namespace,
-                        "joint_state_rate": joint_state_rate,
-                        "max_joint_speed": max_joint_speed,
-                        "max_gripper_speed": max_gripper_speed,
-                        "start_enabled": ParameterValue(start_enabled, value_type=bool),
-                        "gripper_visual_joint_names": ["finger_left"],
-                        # DM URDF 限位：joint2/joint3 为负向范围
-                        "joint_limits": [
-                            -2.8, 2.8,
-                            -3.14, 0.0,
-                            -3.14, 0.0,
-                            -1.87, 1.57,
-                            -1.57, 1.57,
-                            -3.14, 3.14,
-                        ],
-                    }
-                ],
-            ),
+            RegisterEventHandler(OnProcessExit(
+                target_action=driver_node,
+                on_exit=[EmitEvent(event=Shutdown(reason="Simulation driver exited"))],
+            )),
+            RegisterEventHandler(OnProcessExit(
+                target_action=rviz_node,
+                on_exit=[EmitEvent(event=Shutdown(reason="Simulation RViz closed"))],
+            )),
+            driver_node,
             Node(
                 package="robot_state_publisher",
                 executable="robot_state_publisher",
@@ -69,13 +91,6 @@ def generate_launch_description():
                 parameters=[{"robot_description": robot_description}],
                 remappings=[("/joint_states", ["/", arm_namespace, "/joint_states"])],
             ),
-            Node(
-                package="rviz2",
-                executable="rviz2",
-                name="fake_dm_rviz2",
-                output="screen",
-                arguments=["-d", rviz_config],
-                condition=IfCondition(use_rviz),
-            ),
+            rviz_node,
         ]
     )

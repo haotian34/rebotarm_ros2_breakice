@@ -18,6 +18,7 @@ setup(
     license="Apache-2.0",
     entry_points={
         "console_scripts": [
+            "SafetyPanel = rebotarmcontroller.safety_panel:main",
             "reBotArmController = rebotarmcontroller.rebotarm_controller:main",
             "FakeRsDriver = rebotarmcontroller.fake_rs_driver:main",
             "GravityCompensation = rebotarmcontroller.examples.gravity_compensation:main",

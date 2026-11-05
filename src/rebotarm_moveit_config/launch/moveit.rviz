@@ -1,4 +1,7 @@
 Panels:
+  - Class: rebotarm_rviz_panel/SafetyPanel
+    Name: Arm Safety
+    Arm Namespace: rebotarm
   - Class: rviz_common/Displays
     Name: Displays
   - Class: rviz_common/Views

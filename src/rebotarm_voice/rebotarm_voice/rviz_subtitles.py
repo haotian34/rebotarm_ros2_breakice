@@ -1,5 +1,7 @@
 """Publish red, bottom-centered subtitles for RViz's native 2D overlay plugin."""
 from html import escape
+import math
+import time
 
 import rclpy
 from rclpy.node import Node
@@ -46,30 +48,51 @@ class RvizSubtitlesNode(Node):
         self.declare_parameter('arm_namespace', 'rebotarm')
         self.declare_parameter('subtitle_width', 640)
         self.declare_parameter('subtitle_text_size', 22.0)
+        self.declare_parameter('subtitle_timeout', 8.0)
         ns = self.get_parameter('arm_namespace').value.strip('/')
         self.width = self.get_parameter('subtitle_width').value
         self.text_size = self.get_parameter('subtitle_text_size').value
         if self.width < 100 or self.text_size <= 0:
             raise ValueError('Subtitle width must be >= 100 and text size positive')
+        self.timeout = float(self.get_parameter('subtitle_timeout').value)
+        if not math.isfinite(self.timeout) or self.timeout <= 0:
+            raise ValueError('subtitle_timeout must be finite and positive')
+        self.visible_until = 0.0
         self.text, self.status = '', ''
         self.publisher = self.create_publisher(OverlayText, f'/{ns}/voice/subtitles', 1)
         self.create_subscription(String, f'/{ns}/voice/transcript', self._text, 10)
         self.create_subscription(String, f'/{ns}/voice/status', self._status, 10)
-        self.create_timer(1.0, self._publish)
+        self.create_timer(0.2, self._publish)
         self._publish()
 
     def _text(self, msg):
         self.text = msg.data
+        self.visible_until = time.monotonic() + self.timeout
         self._publish()
 
     def _status(self, msg):
         self.status = msg.data
+        self.visible_until = time.monotonic() + self.timeout
         if self.status == 'LISTENING':
             self.text = ''
         self._publish()
 
     def _publish(self):
+        if time.monotonic() >= self.visible_until:
+            self.text = ''
+            self._clear()
+            return
         self.publisher.publish(make_overlay(self.text, self.status, self.width, self.text_size))
+
+    def _clear(self):
+        msg = OverlayText()
+        msg.action = OverlayText.DELETE
+        self.publisher.publish(msg)
+
+    def destroy_node(self):
+        if rclpy.ok():
+            self._clear()
+        return super().destroy_node()
 
 
 def main(args=None):

@@ -178,3 +178,6 @@ ros2 run rebotarm_voice rviz_subtitles
 开始录音时清除上一段文字，显示录音状态。非默认命名空间需对应修改 Topic。
 `show_subtitles:=false` 可关闭自动字幕节点。默认字幕框宽 640 像素、字号 22 pt，
 可单独启动节点并通过 ROS 参数 `subtitle_width`、`subtitle_text_size` 调整。
+
+
+RViz 字幕默认显示 8 秒后自动清除，字幕节点启动和正常退出时也会清除覆盖层。关闭 RViz 不会停止独立运行的语音节点；现在旧识别文本不会无限重发。可使用 `subtitle_timeout:=8.0` 调整 `voice_control.launch.py` 的字幕显示时间（秒，必须大于 0）。
