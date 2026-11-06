@@ -68,6 +68,9 @@ class MotorPassthrough:
         self._pv_latest_pos = {}
         self._pv_latest_vlim = {}
         self._pv_dirty = False
+        self._g_latest_pos = None
+        self._g_latest_vlim = None
+        self._g_dirty = False
         self._pv_timer = self._node.create_timer(
             0.02, self._flush_pos_vel, callback_group=self._node.reentrant_group
         )
@@ -90,10 +93,14 @@ class MotorPassthrough:
                 )
         if hardware.has_gripper:
             for msg_type, label, command in gripper_commands:
+                if label == "cmd/pos_vel":
+                    callback = self._make_gripper_pos_vel_callback()
+                else:
+                    callback = self._make_gripper_callback(label, command)
                 self._subscribe(
                     msg_type,
                     f"/{namespace}/gripper/{label}",
-                    self._make_gripper_callback(label, command),
+                    callback,
                     qos,
                 )
 
@@ -122,23 +129,51 @@ class MotorPassthrough:
 
         return _callback
 
+    def _make_gripper_pos_vel_callback(self) -> object:
+        def _callback(msg) -> None:
+            if not self._can_send_lowlevel(
+                "/gripper/cmd/pos_vel",
+                allow_preempt=False,
+            ):
+                return
+            with self._pv_lock:
+                self._g_latest_pos = float(msg.pos)
+                self._g_latest_vlim = float(msg.vlim)
+                self._g_dirty = True
+
+        return _callback
+
     def _flush_pos_vel(self) -> None:
         with self._pv_lock:
-            if not self._pv_dirty:
-                return
-            positions = dict(self._pv_latest_pos)
-            vlims = dict(self._pv_latest_vlim)
+            positions = dict(self._pv_latest_pos) if self._pv_dirty else None
+            vlims = dict(self._pv_latest_vlim) if self._pv_dirty else None
+            gripper = (
+                (self._g_latest_pos, self._g_latest_vlim)
+                if self._g_dirty
+                else None
+            )
             self._pv_dirty = False
-        if not self._can_send_lowlevel(
+            self._g_dirty = False
+        if positions is None and gripper is None:
+            return
+        if positions is not None and not self._can_send_lowlevel(
             "/joints/*/cmd/pos_vel(batched)", allow_preempt=True
         ):
-            return
+            positions = None
+        if gripper is not None and not self._can_send_lowlevel(
+            "/gripper/cmd/pos_vel(batched)", allow_preempt=False
+        ):
+            gripper = None
         try:
-            self._hardware.send_arm_pos_vel_stream(positions, vlims)
+            if positions is not None:
+                self._hardware.send_arm_pos_vel_stream(positions, vlims)
+            if gripper is not None:
+                self._hardware.send_gripper_pos_vel_cmd(*gripper)
         except Exception as exc:
             self._node.get_logger().warn(f"pos_vel stream failed: {exc}")
         finally:
-            self._node.publish_arm_status()
+            if positions is not None or gripper is not None:
+                self._node.publish_arm_status()
 
     def _make_joint_callback(self, joint_name: str, label: str, command) -> object:
         def _callback(msg) -> None:

@@ -57,6 +57,9 @@ class DanceNode(Node):
         speed_cfg = self.cfg.get("speed", {})
         self.time_scale = float(speed_cfg.get("time_scale", 1.0))
         self.joint_vlim = float(speed_cfg.get("joint_vlim", 1.0))
+        # 轨迹进出斜坡（秒）：轨迹在锚点处全速冲过（循环编舞），
+        # 从静止直接进入会产生速度突变和猛蹿；进出各加一个余弦斜坡
+        self.track_ramp = float(speed_cfg.get("track_ramp_s", 0.8))
         self.get_logger().info(
             f"速度配置: time_scale={self.time_scale}, "
             f"joint_vlim={self.joint_vlim} rad/s, "
@@ -102,7 +105,10 @@ class DanceNode(Node):
 
         # ---- 运行时状态 ----
         self.state = "IDLE"          # IDLE / RUNNING
-        self.current = {j: 0.0 for j in JOINTS}  # 最近一次已知关节角
+        self.current = {j: 0.0 for j in JOINTS}  # 最近一次反馈关节角
+        # 最近一次下发的指令角：步骤衔接以此为准。
+        # 用反馈角衔接会因电机跟踪滞后而在步骤边界产生回跳跳变。
+        self.commanded = {j: 0.0 for j in JOINTS}
         self.steps = []              # 展开后的执行步骤
         self.step_index = 0
         self.step_t = 0.0            # 当前步骤已进行时间
@@ -139,7 +145,9 @@ class DanceNode(Node):
         self.steps = self._build_steps()
         self.step_index = 0
         self.step_t = 0.0
-        self.step_from = dict(self.current)
+        # 以触发瞬间的实际反馈为指令起点，保证第一段连续
+        self.commanded = dict(self.current)
+        self.step_from = dict(self.commanded)
         self.state = "RUNNING"
         self._publish_status("开始表演：舞蹈（机械街舞 + 空间滑步）")
 
@@ -197,7 +205,7 @@ class DanceNode(Node):
         if finished:
             self.step_index += 1
             self.step_t = 0.0
-            self.step_from = dict(self.current)
+            self.step_from = dict(self.commanded)
 
     def _run_step(self, step) -> bool:
         """执行一步，返回该步骤是否完成。"""
@@ -215,12 +223,30 @@ class DanceNode(Node):
             return progress >= 1.0
 
         if t == "track":
-            # 按倍率回放并在相邻帧间插值，避免加速后出现跳帧和关节抖动
+            # 按倍率回放并在相邻帧间插值，避免加速后出现跳帧和关节抖动。
+            # 轨迹锚点是全速冲过设计（循环无缝），因此起步/收尾各加一段
+            # 余弦速度斜坡，让电机从静止平滑并入、再平滑减速退出；
+            # 循环多圈时圈与圈之间保持全速，不受影响。
             tr = self.tracks[step["name"]]
             frames = tr["frames"]
-            frame_pos = self.step_t * tr["rate"] * (self.track_speed / self.time_scale)
+            rate = tr["rate"]
+            speed = self.track_speed / self.time_scale
             total_frames = len(frames) * step["times"]
-            if frame_pos >= total_frames:
+            ramp = max(0.0, self.track_ramp)
+            full_T = total_frames / (rate * speed)
+            total_T = full_T + ramp  # 斜坡损失的时间由总长补偿
+
+            def ramp_gain(x: float) -> float:
+                if ramp <= 0.0 or x >= ramp:
+                    return 1.0
+                return 0.5 - 0.5 * math.cos(math.pi * max(0.0, x) / ramp)
+
+            gain = min(ramp_gain(self.step_t), ramp_gain(total_T - self.step_t))
+            if "_frame_pos" not in step:
+                step["_frame_pos"] = 0.0
+            step["_frame_pos"] += rate * speed * gain * self.dt
+            frame_pos = step["_frame_pos"]
+            if frame_pos >= total_frames or self.step_t >= total_T + 1.0:
                 return True
             frame_index = int(frame_pos)
             alpha = frame_pos - frame_index
@@ -277,6 +303,7 @@ class DanceNode(Node):
         msg.vlim = self.joint_vlim  # 关节速度上限（rad/s）
         self.joint_pubs[joint].publish(msg)
         self.current[joint] = float(pos)
+        self.commanded[joint] = float(pos)
 
     def _command_gripper(self, pos: float):
         msg = JointPosVelCmd()

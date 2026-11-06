@@ -41,6 +41,9 @@ class HardwareManager:
         # Cached full-arm pos_vel targets for coalesced low-level streaming.
         self._pv_target_pos = None
         self._pv_target_vlim = None
+        # Last gripper low-level mode entered via _begin_gripper_lowlevel;
+        # avoids re-sending mode frames for every streamed gripper command.
+        self._gripper_lowlevel_mode = None
         self._safety_worker = None
         hardware_config_path, hardware_data = resolve_hardware_config(
             hardware_config,
@@ -712,7 +715,9 @@ class HardwareManager:
         self.set_state_machine("LOWLEVEL_STREAMING")
 
     def _begin_gripper_lowlevel(self, required_mode: str) -> None:
-        self._enter_mode(self._gripper_group, required_mode, "gripper")
+        if self._gripper_lowlevel_mode != required_mode:
+            self._enter_mode(self._gripper_group, required_mode, "gripper")
+            self._gripper_lowlevel_mode = required_mode
         self.set_state_machine("LOWLEVEL_STREAMING")
 
     @staticmethod
@@ -755,6 +760,7 @@ class HardwareManager:
             if not self._gripper_group.mode_mit():
                 raise RuntimeError("gripper did not enter mit mode")
             self._gripper_group.enable()
+            self._gripper_lowlevel_mode = None
 
     @_locked
     def stop_motion(self) -> None:

@@ -52,8 +52,11 @@ dance:
   #   预计算轨迹(track)的回放速度也会除以该系数；1.0 = 原速
   # joint_vlim：每个关节指令的速度上限（rad/s）
   speed:
-    time_scale: 1.6
-    joint_vlim: 0.6
+    time_scale: 1.0
+    joint_vlim: 1.2
+    # 轨迹进出斜坡（秒）：从静止并入全速轨迹 / 从全速减速退出的时间
+    # groove 在锚点处全速冲过（0.93 rad/s），没有斜坡会猛蹿
+    track_ramp_s: 0.8
 
   # ---------- 动作剧本 ----------
   # 步骤类型：

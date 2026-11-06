@@ -15,6 +15,7 @@ import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 
@@ -70,13 +71,17 @@ class GreetingNode(Node):
         self.create_subscription(
             Bool, f"/{ns}/greeting/start", self._on_start, 10
         )
+        # 驱动以 sensor_data QoS（best_effort）发布，订阅端必须匹配
         self.create_subscription(
-            JointState, f"/{ns}/joint_states", self._on_joint_states, 10
+            JointState, f"/{ns}/joint_states", self._on_joint_states,
+            qos_profile_sensor_data,
         )
 
         # ---- 运行时状态 ----
         self.state = "IDLE"          # IDLE / RUNNING
-        self.current = {j: 0.0 for j in JOINTS}  # 最近一次已知关节角
+        self.current = {j: 0.0 for j in JOINTS}  # 最近一次反馈关节角
+        # 最近一次下发的指令角：步骤衔接以此为准（避免反馈滞后造成回跳）
+        self.commanded = {j: 0.0 for j in JOINTS}
         self.steps = []              # 展开后的执行步骤
         self.step_index = 0
         self.step_t = 0.0            # 当前步骤已进行时间
@@ -113,7 +118,8 @@ class GreetingNode(Node):
         self.steps = self._build_steps()
         self.step_index = 0
         self.step_t = 0.0
-        self.step_from = dict(self.current)
+        self.commanded = dict(self.current)
+        self.step_from = dict(self.commanded)
         self.state = "RUNNING"
         self._publish_status("开始表演：三位置点头问候")
 
@@ -181,7 +187,7 @@ class GreetingNode(Node):
         if finished:
             self.step_index += 1
             self.step_t = 0.0
-            self.step_from = dict(self.current)
+            self.step_from = dict(self.commanded)
 
     def _run_step(self, step) -> bool:
         """执行一步，返回该步骤是否完成。"""
@@ -250,6 +256,7 @@ class GreetingNode(Node):
         msg.vlim = self.joint_vlim  # 速度上限（rad/s），驱动按此限速跟踪
         self.joint_pubs[joint].publish(msg)
         self.current[joint] = float(pos)
+        self.commanded[joint] = float(pos)
 
     def _command_gripper(self, pos: float):
         msg = JointPosVelCmd()
