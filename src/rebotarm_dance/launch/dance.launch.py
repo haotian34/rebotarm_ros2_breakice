@@ -19,8 +19,8 @@ def generate_launch_description():
             DeclareLaunchArgument("auto_start", default_value="false"),
             DeclareLaunchArgument(
                 "track_speed",
-                default_value="2.0",
-                description="预计算轨迹播放速度倍率",
+                default_value="1.0",
+                description="预计算轨迹播放速度倍率（真机会再除以 time_scale）",
             ),
             Node(
                 package="rebotarm_dance",

@@ -38,6 +38,9 @@ class HardwareManager:
         self._cmd_lock = threading.RLock()
         self._safety_latched = False
         self._safety_generation = 0
+        # Cached full-arm pos_vel targets for coalesced low-level streaming.
+        self._pv_target_pos = None
+        self._pv_target_vlim = None
         self._safety_worker = None
         hardware_config_path, hardware_data = resolve_hardware_config(
             hardware_config,
@@ -380,16 +383,37 @@ class HardwareManager:
         pos: float,
         vlim: float,
     ) -> None:
-        index = self._joint_index(joint_name)
-        self._begin_lowlevel_streaming("pos_vel")
-        q = self._arm_group.get_positions(request_feedback=True)
-        target_pos = np.array(q, dtype=np.float64, copy=True)
-        target_vlim = np.array(
-            getattr(self._arm_group, "_pv_vlim"), dtype=np.float64, copy=True
-        )
-        target_pos[index] = float(pos)
-        target_vlim[index] = float(vlim)
-        self._arm_group.send_pos_vel(target_pos, vlim=target_vlim)
+        self.send_arm_pos_vel_stream({joint_name: pos}, {joint_name: vlim})
+
+    @_locked
+    def send_arm_pos_vel_stream(
+        self,
+        positions: dict,
+        vlims: dict,
+    ) -> None:
+        """Coalesced low-level pos_vel streaming.
+
+        Keeps a cached full-arm target while in LOWLEVEL_STREAMING so each
+        flush costs a single group send instead of a feedback read plus a
+        send per message. The cache is invalidated whenever the controller
+        leaves LOWLEVEL_STREAMING or the arm mode changes.
+        """
+        if (
+            self._pv_target_pos is None
+            or self._state_machine != "LOWLEVEL_STREAMING"
+            or self.mode != "pos_vel"
+        ):
+            self._begin_lowlevel_streaming("pos_vel")
+            q = self._arm_group.get_positions(request_feedback=True)
+            self._pv_target_pos = np.array(q, dtype=np.float64, copy=True)
+            self._pv_target_vlim = np.array(
+                getattr(self._arm_group, "_pv_vlim"), dtype=np.float64, copy=True
+            )
+        for name, value in positions.items():
+            self._pv_target_pos[self._joint_index(name)] = float(value)
+        for name, value in vlims.items():
+            self._pv_target_vlim[self._joint_index(name)] = float(value)
+        self._arm_group.send_pos_vel(self._pv_target_pos, vlim=self._pv_target_vlim)
         self.set_state_machine("LOWLEVEL_STREAMING")
 
     def current_pose(self):

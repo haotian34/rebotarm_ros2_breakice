@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from rebotarm_msgs.msg import (
     JointMitCmd,
@@ -57,16 +59,33 @@ class MotorPassthrough:
             ),
         )
 
+        # Coalesce high-rate arm pos_vel commands: keep only the latest
+        # target per joint and flush one batched group send at a fixed rate.
+        # Forwarding every message directly used to cost a full-arm feedback
+        # read plus a full-arm send per message, saturating the serial CAN
+        # bridge and causing jerky motion on real hardware.
+        self._pv_lock = threading.Lock()
+        self._pv_latest_pos = {}
+        self._pv_latest_vlim = {}
+        self._pv_dirty = False
+        self._pv_timer = self._node.create_timer(
+            0.02, self._flush_pos_vel, callback_group=self._node.reentrant_group
+        )
+
         for joint_name in hardware.joint_names:
             for msg_type, label, command in joint_commands:
-                self._subscribe(
-                    msg_type,
-                    f"/{namespace}/joints/{joint_name}/{label}",
-                    self._make_joint_callback(
+                if label == "cmd/pos_vel":
+                    callback = self._make_joint_pos_vel_callback(joint_name)
+                else:
+                    callback = self._make_joint_callback(
                         joint_name,
                         label,
                         command,
-                    ),
+                    )
+                self._subscribe(
+                    msg_type,
+                    f"/{namespace}/joints/{joint_name}/{label}",
+                    callback,
                     qos,
                 )
         if hardware.has_gripper:
@@ -88,6 +107,38 @@ class MotorPassthrough:
                 callback_group=self._node.reentrant_group,
             )
         )
+
+    def _make_joint_pos_vel_callback(self, joint_name: str) -> object:
+        def _callback(msg) -> None:
+            if not self._can_send_lowlevel(
+                f"/joints/{joint_name}/cmd/pos_vel",
+                allow_preempt=True,
+            ):
+                return
+            with self._pv_lock:
+                self._pv_latest_pos[joint_name] = float(msg.pos)
+                self._pv_latest_vlim[joint_name] = float(msg.vlim)
+                self._pv_dirty = True
+
+        return _callback
+
+    def _flush_pos_vel(self) -> None:
+        with self._pv_lock:
+            if not self._pv_dirty:
+                return
+            positions = dict(self._pv_latest_pos)
+            vlims = dict(self._pv_latest_vlim)
+            self._pv_dirty = False
+        if not self._can_send_lowlevel(
+            "/joints/*/cmd/pos_vel(batched)", allow_preempt=True
+        ):
+            return
+        try:
+            self._hardware.send_arm_pos_vel_stream(positions, vlims)
+        except Exception as exc:
+            self._node.get_logger().warn(f"pos_vel stream failed: {exc}")
+        finally:
+            self._node.publish_arm_status()
 
     def _make_joint_callback(self, joint_name: str, label: str, command) -> object:
         def _callback(msg) -> None:

@@ -46,6 +46,14 @@ class GreetingNode(Node):
             self.cfg = yaml.safe_load(f)["greeting"]
         self.get_logger().info(f"已加载动作配置: {config_path}")
 
+        # 真机速度控制：time_scale 统一放慢所有时长，joint_vlim 限制关节速度
+        speed_cfg = self.cfg.get("speed", {})
+        self.time_scale = float(speed_cfg.get("time_scale", 1.0))
+        self.joint_vlim = float(speed_cfg.get("joint_vlim", 1.5))
+        self.get_logger().info(
+            f"速度配置: time_scale={self.time_scale}, joint_vlim={self.joint_vlim} rad/s"
+        )
+
         # ---- 指令发布器：6 个关节 + 夹爪 ----
         self.joint_pubs = {
             j: self.create_publisher(
@@ -132,12 +140,12 @@ class GreetingNode(Node):
                 else:
                     target = dict(cfg[raw["target"]])
                 steps.append({"type": "move", "target": target,
-                              "duration": float(raw["duration"])})
+                              "duration": float(raw["duration"]) * self.time_scale})
             elif t == "nod":
                 n = cfg["nod"]
                 steps.append({"type": "oscillate", "joint": n["joint"],
                               "amplitude": n["amplitude"],
-                              "period": n["period"],
+                              "period": n["period"] * self.time_scale,
                               "times": int(raw.get("times", n["times"])),
                               # 鸡啄米：点头时夹爪联动开合
                               "beak": bool(raw.get("beak", n.get("beak", False)))})
@@ -145,14 +153,15 @@ class GreetingNode(Node):
                 w = cfg["wave"]
                 steps.append({"type": "oscillate", "joint": w["joint"],
                               "amplitude": w["amplitude"],
-                              "period": w["period"],
+                              "period": w["period"] * self.time_scale,
                               "times": int(raw.get("times", 1))})
             elif t == "gripper":
                 steps.append({"type": "gripper", "action": raw["action"],
                               "times": int(raw.get("times", 1)),
-                              "dwell": float(raw.get("dwell", 0.4))})
+                              "dwell": float(raw.get("dwell", 0.4)) * self.time_scale})
             elif t == "wait":
-                steps.append({"type": "wait", "duration": float(raw["duration"])})
+                steps.append({"type": "wait",
+                              "duration": float(raw["duration"]) * self.time_scale})
         return steps
 
     # ---------------- 主循环（30Hz） ----------------
@@ -238,7 +247,7 @@ class GreetingNode(Node):
         msg = JointPosVelCmd()
         msg.stamp = self.get_clock().now().to_msg()
         msg.pos = float(pos)
-        msg.vlim = 1.5  # 速度上限（rad/s），仿真驱动按此限速跟踪
+        msg.vlim = self.joint_vlim  # 速度上限（rad/s），驱动按此限速跟踪
         self.joint_pubs[joint].publish(msg)
         self.current[joint] = float(pos)
 

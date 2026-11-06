@@ -52,6 +52,17 @@ class DanceNode(Node):
             self.cfg = yaml.safe_load(f)["dance"]
         self.get_logger().info(f"已加载动作配置: {config_path}")
 
+        # 真机速度控制：time_scale 统一放慢所有时长与轨迹回放，
+        # joint_vlim 限制关节速度
+        speed_cfg = self.cfg.get("speed", {})
+        self.time_scale = float(speed_cfg.get("time_scale", 1.0))
+        self.joint_vlim = float(speed_cfg.get("joint_vlim", 1.0))
+        self.get_logger().info(
+            f"速度配置: time_scale={self.time_scale}, "
+            f"joint_vlim={self.joint_vlim} rad/s, "
+            f"轨迹回放倍率={self.track_speed / self.time_scale:.2f}x"
+        )
+
         tracks_path = self.get_parameter("tracks_path").value
         if not tracks_path:
             tracks_path = share + "/config/dance_tracks.yaml"
@@ -147,7 +158,7 @@ class DanceNode(Node):
                 else:
                     target = dict(cfg[raw["target"]])
                 steps.append({"type": "move", "target": target,
-                              "duration": float(raw["duration"])})
+                              "duration": float(raw["duration"]) * self.time_scale})
             elif t == "track":
                 name = raw["name"]
                 if name not in self.tracks:
@@ -158,14 +169,15 @@ class DanceNode(Node):
             elif t == "oscillate":
                 steps.append({"type": "oscillate", "joint": raw["joint"],
                               "amplitude": float(raw["amplitude"]),
-                              "period": float(raw["period"]),
+                              "period": float(raw["period"]) * self.time_scale,
                               "times": int(raw.get("times", 1))})
             elif t == "gripper":
                 steps.append({"type": "gripper", "action": raw["action"],
                               "times": int(raw.get("times", 1)),
-                              "dwell": float(raw.get("dwell", 0.4))})
+                              "dwell": float(raw.get("dwell", 0.4)) * self.time_scale})
             elif t == "wait":
-                steps.append({"type": "wait", "duration": float(raw["duration"])})
+                steps.append({"type": "wait",
+                              "duration": float(raw["duration"]) * self.time_scale})
         return steps
 
     # ---------------- 主循环（30Hz） ----------------
@@ -206,7 +218,7 @@ class DanceNode(Node):
             # 按倍率回放并在相邻帧间插值，避免加速后出现跳帧和关节抖动
             tr = self.tracks[step["name"]]
             frames = tr["frames"]
-            frame_pos = self.step_t * tr["rate"] * self.track_speed
+            frame_pos = self.step_t * tr["rate"] * (self.track_speed / self.time_scale)
             total_frames = len(frames) * step["times"]
             if frame_pos >= total_frames:
                 return True
@@ -262,7 +274,7 @@ class DanceNode(Node):
         msg = JointPosVelCmd()
         msg.stamp = self.get_clock().now().to_msg()
         msg.pos = float(pos)
-        msg.vlim = 1.0  # 与预计算轨迹和仿真驱动限速保持一致
+        msg.vlim = self.joint_vlim  # 关节速度上限（rad/s）
         self.joint_pubs[joint].publish(msg)
         self.current[joint] = float(pos)
 
