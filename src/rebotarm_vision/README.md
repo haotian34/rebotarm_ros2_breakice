@@ -41,10 +41,23 @@ ros2 topic echo /rebotarm/gesture_cmd
 
 ## 手掌位置跟随（DM 机械臂）
 
-复用摄像头和 MediaPipe，单手张开连续 5 帧后，以当前手掌位置与当前末端位置为基准，
-跟随左右、上下位移。画面已镜像，画面向右对应基座 -Y，向上对应 +Z；
+复用摄像头和 MediaPipe，单手张开连续 5 帧后开始跟随。
+**摄像头装在机械臂上（眼在手上）**，因此采用速度伺服：手偏离画面中心越远，
+末端向该方向移动越快，直到手回到画面中心（约 4% 死区内停止）。
+画面已镜像（自拍视角）：手往用户右侧偏 → 基座 +Y，偏上 → +Z；
 单目不提供可靠米制深度，因此固定基座 X 方向，末端姿态不锁定。
-握拳、双手入镜或手掌消失会暂停，重新张开后从当前位置重新建立基准，不自动回零。
+
+行为语义（`palm_position` 消息 z 字段）：
+- `z=1.0` 单手张开：正常跟随
+- `z=0.5` 手在画面中但未张开（握拳/双手）：暂停保持，基准保留
+- `z=0.0` 画面中无手：**追丢模式**——沿手最后偏离的方向以 60% 速度继续追，
+  最多 2.5 秒，随后原地保持；重新张手即刻恢复跟随
+
+安全边界：以起手点为原点的盒形工作空间（左右 ±0.25m、上 +0.18m、下 -0.12m，
+X 固定），到达边界即停；指令与实物偏差 >0.12 rad 自动等待重新张手。
+
+**复位**：演示中随时可让手臂平滑回到起手点（约 2 秒）并等待重新张手：
+`ros2 topic pub --once /rebotarm/palm_follow/reset std_msgs/msg/Bool "{data: true}"`
 
 先停止手势动作播放器、语音动作节点、舞蹈和其他向关节发布指令的程序，再启动跟随。
 此入口不发布手势动作命令。默认模型为 DM，不适用于直接驱动 RS。
@@ -62,11 +75,12 @@ ros2 launch rebotarm_bringup fake_dm_bringup.launch.py
 ros2 launch rebotarm_vision palm_follow.launch.py camera_index:=0 show_debug:=true
 ```
 
-建议先将机械臂置于舒展的悬空姿态，再伸出手掌。全零姿态可能处于奇异位形，
-该节点不会自行移动到预备姿态。在线位置雅可比采用阻尼最小二乘法，
+节点启动后自动用 3 秒平滑移动到「鸡脖子」起手位（home_pose），
+到位后张手即可开始跟随，无需手动预置姿态。工作空间以起手位为固定基准
+（左右 ±0.25m、上 +0.18m、下 -0.12m），与从哪里张手无关。在线位置雅可比采用阻尼最小二乘法，
 检查 URDF 关节限位，但不做环境/自碰撞规划。
 
-默认限制：关节 0.3 rad/s、末端目标步进 0.04 m/s、相对起点最大目标位移 0.12 m。
+默认限制：关节 0.6 rad/s、末端追踪速度 0.12 m/s、满幅目标速度 0.15 m/s、相对起点最大位移 0.25 m（真机调校后）。
 手掌或任一关节反馈超过 0.25 秒未更新就停止发送新指令；驱动可能完成最后一个小步。
 若实际关节与指令偏差超过 0.12 rad，则重新等待手掌获取。
 
@@ -75,7 +89,7 @@ ros2 launch rebotarm_vision palm_follow.launch.py camera_index:=0 show_debug:=tr
 ```bash
 ros2 run rebotarm_vision palm_follow_node --ros-args \
   -p max_joint_speed:=0.2 -p max_tcp_speed:=0.03 \
-  -p horizontal_span:=0.20 -p vertical_span:=0.16 -p max_displacement:=0.10
+  -p follow_gain:=0.10 -p max_displacement:=0.20
 
 # 无硬件验证：运动学方向、限速/范围、失效暂停、重新获取
 /usr/bin/python3 src/rebotarm_vision/test/check_palm_follow.py

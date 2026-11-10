@@ -111,6 +111,10 @@ class VisionGestureNode(Node):
             palm.point.x = sum(p[0] for p in points) / (5 * w)
             palm.point.y = sum(p[1] for p in points) / (5 * h)
             palm.point.z = 1.0  # validity flag, NOT metric depth
+        elif hand_lms:
+            # 手在画面中但未张开（握拳/双手）：跟随节点据此暂停保持
+            palm.point.z = 0.5
+        # z=0.0：画面中无手 -> 跟随节点进入短暂追丢模式
         self.palm_pub.publish(palm)
 
         # 去抖：连续 N 帧一致才切换稳定输出
