@@ -65,8 +65,8 @@ greeting:
   #   1.0 = 原速；真机首演建议 1.5~2.0，熟悉后可调小
   # joint_vlim：每个关节指令的速度上限（rad/s），越小越慢越稳
   speed:
-    time_scale: 1.6
-    joint_vlim: 0.8
+    time_scale: 1.2
+    joint_vlim: 1.0
 
   # ---------- 动作剧本 ----------
   # 步骤类型：
