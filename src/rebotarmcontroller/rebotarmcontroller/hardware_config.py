@@ -122,6 +122,11 @@ def _load_ros_hardware_config(
     merged = _deep_merge(merged, model_config.get("overrides", {}) or {})
     if channel:
         merged["channel"] = channel
+    # motorbridge may infer the transport from the device path. Keep stable
+    # by-id/by-path names at the ROS boundary, but pass the tty node to the SDK.
+    device_channel = str(merged.get("channel", ""))
+    if model_name == "dm" and device_channel.startswith("/dev/"):
+        merged["channel"] = str(Path(device_channel).resolve())
     _resolve_package_urdf(merged)
     _add_runtime_config(merged)
 

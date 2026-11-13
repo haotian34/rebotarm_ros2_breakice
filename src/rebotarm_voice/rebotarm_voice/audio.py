@@ -25,7 +25,8 @@ class LocalRecognizer:
         from faster_whisper import WhisperModel
         self.model = WhisperModel(self.model_size, **self.options)
 
-    def record_and_transcribe(self, seconds, sample_rate, device, min_rms, language):
+    def record_and_transcribe(self, seconds, sample_rate, device, min_rms, language,
+                             silence_seconds=0.0, min_speech_seconds=0.25):
         import numpy as np
         import sounddevice as sd
 
@@ -33,9 +34,13 @@ class LocalRecognizer:
             raise RuntimeError("Local Whisper model is not loaded")
         if sample_rate != 16000:
             raise ValueError("Local Whisper waveform input requires 16000 Hz")
-        audio = sd.rec(int(seconds * sample_rate), samplerate=sample_rate,
-                       channels=1, dtype="int16", device=device)
-        sd.wait()
+        if silence_seconds > 0:
+            audio = record_until_silence(sd, seconds, sample_rate, device, min_rms,
+                                         silence_seconds, min_speech_seconds)
+        else:
+            audio = sd.rec(int(seconds * sample_rate), samplerate=sample_rate,
+                           channels=1, dtype="int16", device=device)
+            sd.wait()
         waveform = audio.reshape(-1).astype(np.float32) / 32768.0
         rms = float(np.sqrt(np.mean(waveform ** 2)))
         if rms < min_rms:
@@ -57,6 +62,35 @@ class LocalRecognizer:
                                  f'avg_logprob={min(s.avg_logprob for s in segments):.3f}, '
                                  f'no_speech_prob={max(s.no_speech_prob for s in segments):.3f}')
         return Transcription(text)
+
+
+def record_until_silence(sd, seconds, sample_rate, device, min_rms,
+                         silence_seconds, min_speech_seconds):
+    """Wait for speech, then endpoint on silence; never exceed the recording cap."""
+    import numpy as np
+    total = int(seconds * sample_rate)
+    block = max(1, int(.1 * sample_rate))
+    speech = quiet = recorded = 0
+    chunks = []
+    with sd.InputStream(samplerate=sample_rate, channels=1, dtype='int16',
+                        device=device, blocksize=block) as stream:
+        while recorded < total:
+            frames = min(block, total - recorded)
+            chunk, overflow = stream.read(frames)
+            if overflow:
+                raise RuntimeError('Microphone overflow; utterance may be incomplete')
+            chunk = chunk.copy()
+            chunks.append(chunk)
+            recorded += len(chunk)
+            rms = float(np.sqrt(np.mean((chunk.astype(np.float32) / 32768.) ** 2)))
+            if rms >= min_rms:
+                speech += len(chunk)
+                quiet = 0
+            elif speech >= min_speech_seconds * sample_rate:
+                quiet += len(chunk)
+                if quiet >= silence_seconds * sample_rate:
+                    break
+    return np.concatenate(chunks, axis=0)
 
 
 def download_model():

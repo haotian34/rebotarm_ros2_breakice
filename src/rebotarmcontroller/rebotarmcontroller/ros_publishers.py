@@ -63,6 +63,9 @@ class JointStatePublisher:
             callback_group=node.reentrant_group,
         )
         self.publish_status()
+        self._status_timer = node.create_timer(
+            0.5, self.publish_status, callback_group=node.reentrant_group,
+        )
 
     def publish(self) -> None:
         try:

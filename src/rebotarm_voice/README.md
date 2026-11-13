@@ -42,7 +42,8 @@ ros2 launch rebotarm_bringup fake_dm_bringup.launch.py
 ros2 launch rebotarm_voice voice_control.launch.py
 ```
 
-等待终端出现 `READY: local Whisper loaded` 后再触发录音。
+等待终端出现 `READY: local Whisper loaded` 后再触发录音。就绪后会持续等待，
+没有必须立即输入命令的倒计时；启动终端保持运行，在另一个终端执行 `listenvoice`。
 默认 `execute_motion:=true`，识别到有效口令后执行对应动作。
 如需仅测试识别效果，启动时关闭执行：
 
@@ -50,7 +51,9 @@ ros2 launch rebotarm_voice voice_control.launch.py
 ros2 launch rebotarm_voice voice_control.launch.py execute_motion:=false
 ```
 
-终端三触发录音，然后在 4 秒录音窗口内说出口令：
+终端三触发录音，然后在最长8秒录音窗口内说出口令。检测到至少0.25秒有声后，
+连续静音0.8秒即提前结束录音并转写，不再等满8秒；全程无声仍等待至8秒。
+停顿超过0.8秒会视为一句话结束，可在`voice.yaml`调大`silence_seconds`。
 
 ```bash
 ros2 service call /rebotarm/voice/listen std_srvs/srv/Trigger '{}'
@@ -65,7 +68,7 @@ ros2 topic echo /rebotarm/voice/status
 
 | 完整口令 | 轨迹 |
 |---|---|
-| 出拳 | rock_push |
+| 出拳 / 打死 / 一拳打死 | rock_push |
 | 请画八字 / 画8字 | paper_figure8 |
 | 画爱心 / 画心 | heart_draw |
 | 画圆 / 画个圆 | paper_circle |

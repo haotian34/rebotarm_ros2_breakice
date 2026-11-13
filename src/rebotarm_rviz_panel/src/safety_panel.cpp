@@ -26,15 +26,19 @@ public:
     stop_->setStyleSheet("background:#b71c1c;color:white;font-size:18px;font-weight:bold;");
     home_ = new QPushButton(QString::fromUtf8("停止并缓慢复位"));
     home_->setMinimumHeight(48);
+    release_ = new QPushButton(QString::fromUtf8("解除锁止 / 恢复控制"));
+    release_->setMinimumHeight(44);
+    release_->setEnabled(false);
     layout->addWidget(stop_);
     layout->addWidget(home_);
+    layout->addWidget(release_);
     state_ = new QLabel(QString::fromUtf8("等待控制器状态"));
     state_->setWordWrap(true);
     result_ = new QLabel;
     result_->setWordWrap(true);
     layout->addWidget(state_);
     layout->addWidget(result_);
-    auto *hint = new QLabel(QString::fromUtf8("回零前确保路径无人、无障碍物。\n软件停止不能替代硬件急停。\n触发后锁止运动，检查后重启控制器。"));
+    auto *hint = new QLabel(QString::fromUtf8("回零前确保路径无人、无障碍物。\n软件停止不能替代硬件急停。\n复位结束后，确认安全再解除锁止。\n解除后允许新指令；故障或失能须检查并重启。"));
     hint->setWordWrap(true);
     layout->addWidget(hint);
     layout->addStretch();
@@ -45,12 +49,15 @@ public:
     });
     connect(stop_, &QPushButton::clicked, this, [this]() { send(stop_client_); });
     connect(home_, &QPushButton::clicked, this, [this]() { send(home_client_); });
+    connect(release_, &QPushButton::clicked, this, [this]() { send(release_client_); });
     bind();
     timer_ = new QTimer(this);
     connect(timer_, &QTimer::timeout, this, [this]() {
       executor_.spin_some(std::chrono::milliseconds(2));
       stop_->setEnabled(stop_client_ && stop_client_->service_is_ready());
       home_->setEnabled(home_client_ && home_client_->service_is_ready());
+      const bool fresh = std::chrono::steady_clock::now() - last_state_ <= std::chrono::seconds(2);
+      release_->setEnabled(fresh && releasable_ && !pending_ && release_client_ && release_client_->service_is_ready());
       if (std::chrono::steady_clock::now() - last_state_ > std::chrono::seconds(2)) {
         state_->setText(QString::fromUtf8("控制器状态不可用或已过期"));
       }
@@ -93,20 +100,25 @@ private:
     try {
       auto stop_client = node_->create_client<Trigger>(prefix + "/safety_stop");
       auto home_client = node_->create_client<Trigger>(prefix + "/stop_and_home");
+      auto release_client = node_->create_client<Trigger>(prefix + "/safety_release");
       auto subscription = node_->create_subscription<rebotarm_msgs::msg::ArmStatus>(
         prefix + "/arm_status", rclcpp::QoS(1).reliable().transient_local(),
         [this](rebotarm_msgs::msg::ArmStatus::ConstSharedPtr msg) {
           last_state_ = std::chrono::steady_clock::now();
+          releasable_ = msg->state_machine == "SAFETY_STOPPED" && msg->enabled && msg->control_loop_active;
           state_->setText(QString::fromUtf8("状态：") + QString::fromStdString(msg->state_machine));
         });
       stop_client_ = stop_client;
       home_client_ = home_client;
+      release_client_ = release_client;
       subscription_ = subscription;
       bound_namespace_ = ns;
       namespace_->setText(ns);
       state_->setText(QString::fromUtf8("等待控制器状态"));
       result_->clear();
       last_state_ = std::chrono::steady_clock::time_point{};
+      releasable_ = false;
+      release_->setEnabled(false);
     } catch (const std::exception &e) {
       namespace_->setText(bound_namespace_);
       result_->setText(QString::fromUtf8("命名空间无效，保留原目标：") + e.what());
@@ -136,14 +148,15 @@ private:
   }
   QString bound_namespace_;
   QLineEdit *namespace_;
-  QPushButton *stop_, *home_;
+  QPushButton *stop_, *home_, *release_;
   QLabel *state_, *result_;
   QTimer *timer_;
   rclcpp::Node::SharedPtr node_;
   rclcpp::executors::SingleThreadedExecutor executor_;
-  Client::SharedPtr stop_client_, home_client_, pending_client_;
+  Client::SharedPtr stop_client_, home_client_, release_client_, pending_client_;
   rclcpp::Subscription<rebotarm_msgs::msg::ArmStatus>::SharedPtr subscription_;
   bool pending_ = false;
+  bool releasable_ = false;
   int64_t pending_id_ = 0;
   std::chrono::steady_clock::time_point last_state_{}, deadline_{};
 };

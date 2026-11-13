@@ -101,3 +101,70 @@ class SafetyLatchTest(unittest.TestCase):
         for velocity in (0, -1, 0.2, math.inf, math.nan):
             with self.assertRaises(ValueError):
                 self.hardware.stop_and_home(velocity)
+
+
+class SafetyReleaseTest(unittest.TestCase):
+    def setUp(self):
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        import numpy as np
+        h = object.__new__(HardwareManager)
+        self.hardware = h
+        h._cmd_lock = threading.RLock()
+        h._safety_latched = True
+        h._safety_generation = 3
+        h._state_machine = 'SAFETY_STOPPED'
+        h._safety_worker = None
+        h._connected = h._enabled = h._control_output_enabled = True
+        h._endpos_ctrl = SimpleNamespace(_q_target=np.array([0.2]), _qd_target=np.zeros(1))
+        h.get_joint_positions = Mock(return_value=np.array([0.2]))
+        h.get_joint_velocities = Mock(return_value=np.zeros(1))
+        h._robot = Mock(has_gripper=False, _motor_map={'joint1': Mock()}, _ctrl_map={'bus': Mock()})
+
+    def test_release_holds_position_without_enable_or_new_trajectory(self):
+        self.hardware.safety_release()
+        h = self.hardware
+        self.assertFalse(h._safety_latched)
+        self.assertEqual(h.state_machine, 'IDLE')
+        self.assertEqual(h._safety_generation, 4)
+        self.assertEqual(h._endpos_ctrl._q_target[0], 0.2)
+        h._robot.enable_all.assert_not_called()
+        h._robot.start_control_loop.assert_not_called()
+
+    def test_homing_and_fault_cannot_release(self):
+        for state in ('SAFETY_HOMING', 'SAFETY_FAULT'):
+            self.hardware._state_machine = state
+            with self.assertRaises(RuntimeError):
+                self.hardware.safety_release()
+            self.assertTrue(self.hardware._safety_latched)
+
+    def test_disabled_disconnected_or_stopped_output_cannot_release(self):
+        for field in ('_enabled', '_connected', '_control_output_enabled'):
+            setattr(self.hardware, field, False)
+            with self.assertRaises(RuntimeError):
+                self.hardware.safety_release()
+            self.assertTrue(self.hardware._safety_latched)
+            setattr(self.hardware, field, True)
+
+    def test_running_home_worker_cannot_release(self):
+        from unittest.mock import Mock
+        self.hardware._safety_worker = Mock()
+        self.hardware._safety_worker.is_alive.return_value = True
+        with self.assertRaises(RuntimeError):
+            self.hardware.safety_release()
+
+    def test_bus_failure_does_not_clear_latch(self):
+        self.hardware._robot._ctrl_map['bus'].poll_feedback_once.side_effect = RuntimeError('USB lost')
+        with self.assertRaisesRegex(RuntimeError, 'USB lost'):
+            self.hardware.safety_release()
+        self.assertTrue(self.hardware._safety_latched)
+
+    def test_invalid_moving_and_off_target_feedback_cannot_release(self):
+        import numpy as np
+        for position, velocity in ((math.nan, 0), (0.2, 0.2), (0.8, 0)):
+            self.hardware.get_joint_positions.return_value = np.array([position])
+            self.hardware.get_joint_velocities.return_value = np.array([velocity])
+            with self.assertRaises(RuntimeError):
+                self.hardware.safety_release()
+            self.assertTrue(self.hardware._safety_latched)

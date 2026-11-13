@@ -851,3 +851,11 @@ ros2 service call /rebotarm/disable std_srvs/srv/Trigger
 - 夹爪 `open` / `close` service 是位置控制接口，不包含力反馈夹取判断。
 - 多机械臂场景中，`arm_namespace` 只解决 ROS graph 命名冲突；TF frame 仍需额外规划 frame 前缀或 URDF 命名。
 - 修改 `hardware_manager.py`、`ros_services.py` 或 `ros_actions.py` 后，需要重启 `driver.launch.py` 才会加载新 controller 逻辑。
+
+
+### 解除安全锁止
+
+`/rebotarm/safety_release`：`std_srvs/srv/Trigger`，命名空间可配置。
+只允许使能且保持控制有效的 `SAFETY_STOPPED` 状态解除锁止。复位线程未退出、故障、
+失能、总线调用异常或反馈校验失败时拒绝。成功后保持当前位置并转为 `IDLE`，
+不重新使能、不连接硬件、不续播旧手势轨迹。解除后允许接收新的运动指令。

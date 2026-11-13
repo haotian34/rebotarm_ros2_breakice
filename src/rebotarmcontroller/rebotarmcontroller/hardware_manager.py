@@ -20,7 +20,7 @@ def _locked(method):
             if getattr(self, "_safety_latched", False) and method.__name__ not in (
                 "stop_motion", "hold_current_position", "disable", "set_state_machine",
             ):
-                raise RuntimeError("safety stop latched; restart controller after inspection")
+                raise RuntimeError("safety stop latched; inspect then use safety_release")
             return method(self, *args, **kwargs)
 
     return wrapper
@@ -815,6 +815,44 @@ class HardwareManager:
                 self._enabled = False
                 self._state_machine = "SAFETY_FAULT"
                 raise
+
+    def safety_release(self) -> None:
+        """Release a healthy, stationary hold; never reconnect or enable motors."""
+        with self._cmd_lock:
+            if not self._safety_latched:
+                raise RuntimeError("safety latch is not active")
+            if self._state_machine != "SAFETY_STOPPED":
+                raise RuntimeError("release requires SAFETY_STOPPED; wait for home or inspect fault")
+            if self._safety_worker is not None and self._safety_worker.is_alive():
+                raise RuntimeError("home worker is still active; wait before releasing")
+            if not self._connected or not self._enabled or not self._control_output_enabled:
+                raise RuntimeError("controller disconnected or disabled; inspect and restart driver")
+            # Explicit calls propagate bus errors (the SDK group reader can
+            # otherwise suppress them and return cached positions).
+            for motor in self._robot._motor_map.values():
+                motor.request_feedback()
+            for controller in self._robot._ctrl_map.values():
+                controller.poll_feedback_once()
+            q = self.get_joint_positions(request=True).copy()
+            velocity = self.get_joint_velocities(request=True)
+            if (q.shape != self._endpos_ctrl._q_target.shape
+                    or not np.all(np.isfinite(q)) or not np.all(np.isfinite(velocity))
+                    or np.max(np.abs(velocity)) > 0.05
+                    or np.max(np.abs(q - self._endpos_ctrl._q_target)) > 0.1):
+                raise RuntimeError("invalid, moving or off-target feedback; latch remains active")
+            if self.has_gripper:
+                gripper = self.get_gripper_state()
+                if not np.all(np.isfinite(gripper[:3])) or abs(gripper[1]) > 0.05:
+                    raise RuntimeError("invalid or moving gripper feedback; latch remains active")
+                self._endpos_ctrl.set_gripper_target(gripper[0])
+                self._gripper_target_position = gripper[0]
+            self._endpos_ctrl._q_target[:] = q
+            self._endpos_ctrl._qd_target[:] = 0.0
+            self._pv_target_pos = None
+            self._pv_target_vlim = None
+            self._safety_generation += 1
+            self._state_machine = "IDLE"
+            self._safety_latched = False
 
     def stop_and_home(self, max_velocity: float = 0.1) -> None:
         """Stop immediately, then stream a bounded, interruptible zero trajectory."""

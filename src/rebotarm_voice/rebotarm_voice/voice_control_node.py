@@ -16,7 +16,8 @@ class VoiceControlNode(Node):
     def __init__(self):
         super().__init__('rebotarm_voice')
         defaults = dict(arm_namespace='rebotarm', execute_motion=True,
-                        wake_word='', record_seconds=4.0, sample_rate=16000,
+                        wake_word='', record_seconds=8.0, sample_rate=16000,
+                        silence_seconds=0.8, min_speech_seconds=0.25,
                         audio_device='', min_rms=0.01, language='zh',
                         model_size="small", model_device="cpu", compute_type="int8",
                         model_cache="", cpu_threads=4, max_command_age=25.0,
@@ -35,6 +36,11 @@ class VoiceControlNode(Node):
                 raise ValueError(f'{key} must be finite and positive')
         if not 0 < self.cfg['record_seconds'] <= 15:
             raise ValueError('record_seconds must be <= 15')
+        for key in ('silence_seconds', 'min_speech_seconds'):
+            if not math.isfinite(self.cfg[key]) or self.cfg[key] <= 0:
+                raise ValueError(f'{key} must be finite and positive')
+        if self.cfg['min_speech_seconds'] > self.cfg['record_seconds']:
+            raise ValueError('min_speech_seconds must not exceed record_seconds')
         if self.cfg['sample_rate'] != 16000:
             raise ValueError('Local Whisper requires sample_rate=16000')
         if self.cfg['cpu_threads'] < 1:
@@ -87,6 +93,22 @@ class VoiceControlNode(Node):
                 and time.monotonic() >= self.block_until
                 and self.play.get_subscription_count() == 1)
 
+    def _unavailable_reason(self):
+        count = self.play.get_subscription_count()
+        if count > 1:
+            return f'Duplicate action players ({count}); stop extra players, keep exactly one'
+        if count == 0:
+            return 'No action player connected; start an action player'
+        if self.pending:
+            return 'Waiting for action player acknowledgement'
+        if time.monotonic() - self.status_at >= self.cfg['status_timeout']:
+            return 'Action player status is missing or stale'
+        if self.player_state.startswith('BUSY:'):
+            return f'Action still running ({self.player_state}); wait for completion'
+        if self.player_state != 'IDLE':
+            return f'Action player is not idle ({self.player_state})'
+        return f'Cooling down; retry in {max(0., self.block_until-time.monotonic()):.1f}s'
+
     def _listen(self, request, response):
         if not self.model_ready:
             response.success, response.message = False, 'Local model not ready; check voice/status and logs'
@@ -95,7 +117,7 @@ class VoiceControlNode(Node):
             response.success, response.message = False, 'Recording/transcribing already in progress'
             return response
         if self.cfg['execute_motion'] and not self._ready():
-            response.success, response.message = False, 'Player unavailable, busy, or cooling down'
+            response.success, response.message = False, self._unavailable_reason()
             return response
         device = self.cfg['audio_device'] or None
         if device and device.isdigit():
@@ -103,7 +125,9 @@ class VoiceControlNode(Node):
         self.started_at = time.monotonic()
         self.future = self.pool.submit(
             self.recognizer.record_and_transcribe, self.cfg['record_seconds'], self.cfg['sample_rate'],
-            device, self.cfg['min_rms'], self.cfg['language'])
+            device, self.cfg['min_rms'], self.cfg['language'],
+            silence_seconds=self.cfg['silence_seconds'],
+            min_speech_seconds=self.cfg['min_speech_seconds'])
         response.success, response.message = True, 'Recording started; see voice/status and voice/transcript'
         self._report('LISTENING')
         return response

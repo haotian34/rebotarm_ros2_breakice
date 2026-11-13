@@ -19,6 +19,7 @@ class ArmServices:
         services = (
             (Trigger, "safety_stop", self.safety_stop, node.reentrant_group),
             (Trigger, "stop_and_home", self.stop_and_home, node.reentrant_group),
+            (Trigger, "safety_release", self.safety_release, node.reentrant_group),
             (Trigger, "enable", self.enable, node.slow_group),
             (Trigger, "disable", self.disable, node.slow_group),
             (Trigger, "safe_home", self.safe_home, node.slow_group),
@@ -68,6 +69,10 @@ class ArmServices:
 
     def enable(self, _request, response):
         return self._run(response, self._hardware.enable, "enabled")
+
+    def safety_release(self, _request, response):
+        return self._run(response, self._hardware.safety_release,
+                         "safety latch released; holding current position; ready for new commands")
 
     def disable(self, _request, response):
         def action():

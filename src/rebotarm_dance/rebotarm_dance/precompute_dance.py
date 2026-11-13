@@ -26,7 +26,7 @@ config/dance_tracks.yaml，运行时节点只做插值回放，不在线解 IK�
   2. 相邻帧线性插值中点的 FK 漂移 < MAX_POS_ERR（保证节点
      30Hz 回放 / 驱动器内部插值时 TCP 仍达标）
   3. 关节限位余量 > LIMIT_MARGIN，相邻帧关节速度 < MAX_JOINT_SPEED
-     （仿真驱动 max_joint_speed=1.0 rad/s，留 10% 余量）
+     （沿用DM SDK的POS_VEL配置：关节1~3为5、关节4~6为3 rad/s）
 
 用法：
   python3 -m rebotarm_dance.precompute_dance          # 在源码树中运行
@@ -62,7 +62,7 @@ DANCE_CFG = Path(__file__).resolve().parents[1] / "config" / "dance.yaml"
 RATE_HZ = 30.0                 # 轨迹采样率（与 dance_node 回放频率一致）
 MAX_POS_ERR = 0.002            # TCP 位置误差上限 2mm
 LIMIT_MARGIN = 0.05            # 关节限位最小余量（rad）
-MAX_JOINT_SPEED = 0.95         # 相邻帧关节速度上限（驱动限 1.0，留余量）
+MAX_JOINT_SPEED = np.array([5.0, 5.0, 5.0, 3.0, 3.0, 3.0])  # DM SDK配置值
 
 HOME_Q = np.array([0.0, -0.62, -0.85, 0.0, 0.0, 0.0])   # 悬空鸡脖子
 JOINT_LIMITS_LO = np.array([-2.8, -3.14, -3.14, -1.87, -1.57, -3.14])
@@ -260,7 +260,9 @@ def verify_track(name, frames, targets, model, data, fid, ref_rot=None):
     # 首尾闭环检查（groove 循环时相邻）
     loop_gap = float(np.linalg.norm(arr[0] - arr[-1]))
     margin = np.minimum(arr - JOINT_LIMITS_LO, JOINT_LIMITS_HI - arr).min()
-    max_vel = float(np.abs(np.diff(arr, axis=0)).max() * RATE_HZ) if len(arr) > 1 else 0.0
+    joint_speeds = (np.abs(np.diff(arr, axis=0)).max(axis=0) * RATE_HZ
+                    if len(arr) > 1 else np.zeros(6))
+    max_vel = float(joint_speeds.max())
 
     print(f"  [{name}] 帧数={len(arr)} 时长={len(arr)/RATE_HZ:.1f}s")
     print(f"    FK 位置误差 max      = {worst_pos*1000:.3f} mm")
@@ -274,7 +276,7 @@ def verify_track(name, frames, targets, model, data, fid, ref_rot=None):
         print(f"    姿态漂移 max         = {worst_rot:.1f} deg")
 
     ok = (worst_pos < MAX_POS_ERR and worst_mid < MAX_POS_ERR
-          and margin > LIMIT_MARGIN and max_vel < MAX_JOINT_SPEED)
+          and margin > LIMIT_MARGIN and bool(np.all(joint_speeds < MAX_JOINT_SPEED)))
     if not ok:
         raise RuntimeError(f"轨迹 [{name}] 校验未通过，请调整编舞参数后重跑")
     return {"frames": len(arr), "max_pos_err_mm": round(worst_pos * 1000, 4),

@@ -1,5 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -12,6 +13,7 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
+            DeclareLaunchArgument("start_player", default_value="true"),
             # 动作结束后忽略手势的冷却时间（秒）
             DeclareLaunchArgument("cooldown_sec", default_value="2.0"),
             # 动作结束后的复位姿态：zeros=全零初始位 / home=悬空鸡脖子 / none=不复位
@@ -19,6 +21,7 @@ def generate_launch_description():
             Node(
                 package="rebotarm_gesture_actions",
                 executable="trajectory_player_node",
+                condition=IfCondition(LaunchConfiguration("start_player")),
                 name="rebotarm_trajectory_player",
                 output="screen",
                 parameters=[

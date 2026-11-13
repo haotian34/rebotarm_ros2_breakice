@@ -6,7 +6,9 @@ ROS2 Jazzy / reBot Arm B601-DM，仿真与真机通用（接口一致）。
 
 ```bash
 # 终端1（每个新终端都要先 source）
-source /opt/ros/jazzy/setup.bash && source ~/rebotarm_ros2/install/setup.bash
+# 在项目根目录执行
+source ./alias.txt
+loadros && loadarm
 ros2 launch rebotarm_bringup fake_dm_bringup.launch.py   # 虚拟驱动 + RViz
 
 # 终端2
@@ -38,7 +40,10 @@ ros2 topic pub --once /rebotarm/dance/start std_msgs/msg/Bool "{data: true}"
   ```
 
   脚本会重新离线解 IK 并对每帧做 FK 校验（TCP 误差 <2mm、插值中点漂移
-  <2mm、限位余量 >0.05rad、关节速度 <0.95rad/s），不达标会拒绝写文件。
+  <2mm、限位余量 >0.05rad、关节1~3速度 <5rad/s、关节4~6 <3rad/s），不达标会拒绝写文件。
+
+  电机速度上限沿用DM SDK配置：关节1~3为5rad/s，关节4~6和夹爪为3rad/s。
+  `joint_vlim` 可设置更低值；此上限不改变轨迹时长，播放倍率仍由 `track_speed/time_scale` 决定。
 
 ## 实现要点
 

@@ -48,6 +48,7 @@ def generate_launch_description():
     model = LaunchConfiguration("model")
     channel = LaunchConfiguration("channel")
     joint_state_rate = LaunchConfiguration("joint_state_rate")
+    pos_vel_rate = LaunchConfiguration("pos_vel_rate")
     cmd_arbitration = LaunchConfiguration("cmd_arbitration")
     arm_namespace = LaunchConfiguration("arm_namespace")
     use_rviz = LaunchConfiguration("use_rviz")
@@ -85,6 +86,7 @@ def generate_launch_description():
             DeclareLaunchArgument("model", default_value=""),
             DeclareLaunchArgument("channel", default_value=""),
             DeclareLaunchArgument("joint_state_rate", default_value="100.0"),
+            DeclareLaunchArgument("pos_vel_rate", default_value="100.0"),
             DeclareLaunchArgument("cmd_arbitration", default_value="reject"),
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             DeclareLaunchArgument("use_rviz", default_value="false"),
@@ -104,6 +106,7 @@ def generate_launch_description():
                         "model": model,
                         "channel": channel,
                         "joint_state_rate": joint_state_rate,
+                        "pos_vel_rate": pos_vel_rate,
                         "cmd_arbitration": cmd_arbitration,
                         "arm_namespace": arm_namespace,
                         "frame_id": frame_id,

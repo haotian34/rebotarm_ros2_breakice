@@ -902,13 +902,86 @@ export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
 
 ## 各功能启动操作速查
 
-本节集中列出日常操作。命令以当前工作空间 `/home/syh/rebotarm_ros2`、ROS 2 Jazzy 为例；
-其他安装位置请替换目录，Humble 用户将 `jazzy` 改为 `humble`。
+本节集中列出日常操作。请先进入你实际克隆的项目根目录；下面以 ROS 2 Jazzy 为例，
+Humble 用户将 `jazzy` 改为 `humble`。
+
+### 项目快捷命令
+
+在 Bash 中，从项目根目录加载快捷命令：
+
+```bash
+source ./alias.txt
+loadros
+loadarm
+```
+
+真机快捷命令 `startreal` 会打开 RViz，型号默认读取硬件配置（当前为 DM）。
+DM 未指定通道且 YAML 使用默认 `/dev/ttyACM0` 时，自动选择唯一 USB 串口的稳定 by-id 路径；
+没有 by-id 时使用唯一的 ttyACM/ttyUSB 节点。多个候选或没有设备时会在启动前报错。
+RS 保留 YAML 的 SocketCAN 通道；显式指定的通道和自定义 YAML 通道优先。
+`startreal` 自动加载 ROS 和项目环境，并在子 shell 中过滤 Snap 注入的库和插件路径。
+先停止同命名空间的仿真驱动，再执行：
+
+```bash
+loadros
+loadarm
+startreal
+# 指定其他通道：startreal model:=dm channel:=/dev/ttyACM1
+# RS（需先配置 can0）：startreal model:=rs channel:=can0
+```
+
+#### 换电脑连接 USB 串口真机
+
+需要 Ubuntu、兼容的 ROS 2、项目依赖和底层 SDK；克隆到新位置后重新构建，不能直接搬运
+旧的 `build/` 和 `install/`。项目命令不依赖用户名或固定项目位置。
+
+每台电脑首次使用时，连接设备并查看稳定路径：
+
+```bash
+source ./alias.txt
+ls -l /dev/serial/by-id/
+setupserial /dev/serial/by-id/实际设备名称
+```
+
+`setupserial` 自动识别设备所属组，通过 sudo 将当前用户加入该组；不连接或使能机械臂。
+完成后注销桌面并重新登录。设备若无 by-id 路径，可传实际的 `/dev/ttyACM0` 或 `/dev/ttyUSB0`。
+不需要每次插拔重新授权，但需确保设备规则继续使用同一串口组。
+
+以后启动可直接指定稳定路径：
+
+```bash
+source ./alias.txt
+startreal channel:=/dev/serial/by-id/实际设备名称
+```
+
+也可在各电脑自己的终端配置中设置 `REBOTARM_CHANNEL`，之后直接执行 `startreal`。
+命令行 `channel:=...` 的优先级高于该环境变量。DM 默认通道支持上述唯一串口自动选择。
+by-id 名称可能随适配器变化，项目不猜测或自动连接多个设备中的任意一个。
+`setupserial` 用于 DM 等 USB 串口连接；RS 的 SocketCAN 仍需在各电脑配置接口。
+
+`loadarm` 和 `dance` 根据 `alias.txt` 所在目录定位项目，加载后切换工作目录也可使用。
+移动或重命名项目后，在新目录重新执行 `source ./alias.txt`。
+`loadros` 优先使用 `REBOTARM_ROS_DISTRO`，其次使用当前 `ROS_DISTRO`；两者未设置时，
+依次查找 Jazzy、Humble。可以用 `export REBOTARM_ROS_DISTRO=humble` 指定版本。
+`startsimulation`、`startvision`、`startgesture` 在加载 ROS 和项目环境后使用；
+`dance` 会自动加载环境并触发舞蹈。
+构建时推荐使用 `buildarm`：它在子 shell 中加载系统 ROS 环境，动态排除当前 Conda
+安装目录，并清理 CMake 缓存，避免已加载的项目环境和 Conda 库干扰构建；不改变当前终端环境。
+
+```bash
+source ./alias.txt
+buildarm
+loadros
+loadarm
+```
+
+可用 `buildarm --packages-select rebotarm_vision` 仅构建指定包（依赖需已构建）。
+若要在新终端自动加载，可在 `~/.bashrc` 中 source 此文件；项目移动后也需更新该入口路径。
 
 ### 1. 每个终端先加载环境
 
 ```bash
-cd /home/syh/rebotarm_ros2
+# 在项目根目录执行
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 ```
@@ -1234,3 +1307,26 @@ ros2 run rebotarm_agent rebotarm_text_agent --http-server --http-host 127.0.0.1 
 在对应长期运行节点的终端按 `Ctrl+C`。切换运动功能前，先停掉旧运动控制节点；
 驱动和 RViz 可按需要保留。修改代码或启动配置后重新构建相应包，并在每个终端
 重新 `source install/setup.bash`、重启对应节点。`Ctrl+C` 不是硬件急停。
+
+
+### RViz 解除安全锁止
+
+Arm Safety 面板新增“解除锁止 / 恢复控制”按钮。停止或缓慢复位完成后，确认现场安全，
+点击该按钮可恢复接受新命令，无需正常情况下重启驱动。按钮仅在近期状态为
+`SAFETY_STOPPED`、电机使能且保持控制运行时可用；复位过程中、状态过期、故障或失能时不可用。
+服务还检查复位线程是否结束、总线调用是否报错、反馈是否合法及是否静止并接近保持目标。
+解除不会重新连接、重新使能或开始回零，也不会恢复被取消的手势轨迹；放下手后重新做手势触发。
+解除后其他持续发送的新运动指令可以被接收，请先停止不需要的运动源。
+底层 SDK 不提供反馈时间戳，此检查不能替代现场检查或证明设备通信绝对可靠。
+
+```bash
+# 构建后关闭旧驱动与 RViz，再加载环境并重启，才会加载新服务和面板插件。
+source ./alias.txt
+buildarm --packages-select rebotarmcontroller rebotarm_rviz_panel rebotarm_gesture_actions
+loadros
+loadarm
+startreal
+```
+
+也可调用 `ros2 service call /rebotarm/safety_release std_srvs/srv/Trigger '{}'`。
+DM/RS Fake 驱动同样支持此服务。控制器状态现在每 0.5 秒发布，正常静止不会因无操作而过期。

@@ -60,6 +60,28 @@ def test_home_finishes_with_latch_active(driver):
     assert driver.safety_latched
 
 
+def test_release_after_home_holds_then_accepts_new_commands(driver):
+    driver.positions[0] = 0.05
+    driver._stop_and_home(None, Trigger.Response())
+    assert not driver._safety_release(None, Trigger.Response()).success
+    driver.last_time = driver.get_clock().now() - Duration(seconds=1)
+    driver._tick()
+    assert driver._safety_release(None, Trigger.Response()).success
+    assert driver.targets == driver.positions
+    assert driver.state_machine == 'IDLE'
+    assert not driver.safety_latched
+    driver._set_joint_target(0, 0.5)
+    assert driver.targets[0] == 0.5
+
+
+def test_release_does_not_enable_disabled_driver(driver):
+    driver._safety_stop(None, Trigger.Response())
+    driver._disable(None, Trigger.Response())
+    assert not driver._safety_release(None, Trigger.Response()).success
+    assert driver.safety_latched
+    assert not driver.enabled
+
+
 def test_disabled_driver_never_starts_home(driver):
     driver._disable(None, Trigger.Response())
     driver.positions[0] = 0.8

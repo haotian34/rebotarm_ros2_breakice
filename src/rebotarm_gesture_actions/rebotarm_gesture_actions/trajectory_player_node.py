@@ -21,13 +21,16 @@ import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import qos_profile_sensor_data, QoSProfile, DurabilityPolicy
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
-from rebotarm_msgs.msg import JointPosVelCmd
+from rebotarm_msgs.msg import JointPosVelCmd, ArmStatus
+from .player_lock import acquire_player_lock, PlayerAlreadyRunning
 
 JOINTS = [f"joint{i}" for i in range(1, 7)]
+# DM SDK rebotarm_dm.yaml 的POS_VEL配置值；不是硬件性能保证。
+JOINT_SPEED_LIMITS = dict(zip(JOINTS, [5.0, 5.0, 5.0, 3.0, 3.0, 3.0]))
 
 # 各关节安全限位（与 DM URDF 一致），回放逐帧钳制
 # 注意：DM 的 joint2/joint3 是「负向范围」，绝对不要给正数！
@@ -49,15 +52,20 @@ class TrajectoryPlayerNode(Node):
         self.declare_parameter("rate_hz", 30.0)
         self.declare_parameter("tracks_path", "")
         self.declare_parameter("entry_duration", 1.5)  # 当前姿态 -> 轨迹首帧
-        self.declare_parameter("vlim", 1.0)            # 关节速度上限（驱动限速）
+        self.declare_parameter("vlim", 5.0)            # 逐关节按SDK配置限制腕部
+        self.declare_parameter("rock_vlim", 5.0)
+        self.declare_parameter("figure8_vlim", 5.0)
         # 动作结束后的复位姿态：zeros=全零初始位 / home=悬空鸡脖子 / none=不复位
         self.declare_parameter("reset_pose", "zeros")
         self.declare_parameter("reset_duration", 2.0)
 
         ns = self.get_parameter("arm_namespace").value.strip("/")
+        self._player_lock = acquire_player_lock(ns)
         self.rate_hz = float(self.get_parameter("rate_hz").value)
         self.entry_duration = float(self.get_parameter("entry_duration").value)
         self.vlim = float(self.get_parameter("vlim").value)
+        self.rock_vlim = float(self.get_parameter("rock_vlim").value)
+        self.figure8_vlim = float(self.get_parameter("figure8_vlim").value)
         self.reset_pose = str(self.get_parameter("reset_pose").value)
         self.reset_duration = float(self.get_parameter("reset_duration").value)
         reset_targets = {
@@ -111,6 +119,10 @@ class TrajectoryPlayerNode(Node):
         self.frame_index = 0
         self.entry_from = {}
         self.entry_t = 0.0
+        self.safety_blocked = False
+        self.create_subscription(
+            ArmStatus, f"/{ns}/arm_status", self._on_arm_status,
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
 
         self.dt = 1.0 / self.rate_hz
         self.create_timer(self.dt, self._tick)
@@ -129,6 +141,10 @@ class TrajectoryPlayerNode(Node):
                 self.current[name] = float(pos)
 
     def _on_play(self, msg: String):
+        if self.safety_blocked:
+            self.get_logger().warn("安全锁止，忽略播放请求；解除后需重新触发")
+            self._publish_status("IDLE")
+            return
         name = msg.data.strip()
         if self.state != "IDLE":
             self.get_logger().warn(f"正在播放 [{self.track_name}]，忽略请求 [{name}]")
@@ -148,6 +164,16 @@ class TrajectoryPlayerNode(Node):
         self._publish_status(f"BUSY:{name}")
         self.get_logger().info(f"开始播放 [{name}]（{len(self.frames)} 帧，"
                                f"{len(self.frames) / self.rate_hz:.1f}s）")
+
+    def _on_arm_status(self, msg: ArmStatus):
+        self.safety_blocked = msg.state_machine.startswith("SAFETY_") or not msg.enabled
+        if self.safety_blocked and self.state != "IDLE":
+            self.state = "IDLE"
+            self.frames = []
+            self.frame_index = 0
+            self.entry_from = {}
+            self._publish_status("IDLE")
+            self.get_logger().warn("安全停止已取消当前轨迹；解除后不会续播")
 
     def _status_heartbeat(self):
         self._publish_status("IDLE" if self.state == "IDLE"
@@ -216,20 +242,37 @@ class TrajectoryPlayerNode(Node):
         msg.stamp = self.get_clock().now().to_msg()
         msg.pos = float(pos)
         msg.vlim = self.vlim
+        if self.state == "TRACK":
+            if self.track_name == "rock_push":
+                msg.vlim = self.rock_vlim
+            elif self.track_name == "paper_figure8":
+                msg.vlim = self.figure8_vlim
+        msg.vlim = min(msg.vlim, JOINT_SPEED_LIMITS[joint])
         self.joint_pubs[joint].publish(msg)
         self.current[joint] = float(pos)
 
 
+    def destroy_node(self):
+        try:
+            return super().destroy_node()
+        finally:
+            self._player_lock.close()
+
+
 def main(args=None):
     rclpy.init(args=args)
-    node = TrajectoryPlayerNode()
+    node = None
     try:
+        node = TrajectoryPlayerNode()
         rclpy.spin(node)
+    except PlayerAlreadyRunning as exc:
+        rclpy.logging.get_logger('rebotarm_trajectory_player').info(str(exc))
     except KeyboardInterrupt:
         pass
     finally:
         try:
-            node.destroy_node()
+            if node is not None:
+                node.destroy_node()
             if rclpy.ok():
                 rclpy.shutdown()
         except BaseException:

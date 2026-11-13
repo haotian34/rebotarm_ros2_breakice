@@ -9,11 +9,12 @@ TRADITIONAL = str.maketrans({
     '請': '请', '幫': '帮', '給': '给', '機': '机', '臂': '臂',
     '謝': '谢', '嗎': '吗', '揮': '挥', '園': '园', '來': '来',
     '別': '别', '後': '后', '還': '还', '說': '说', '聽': '听',
-    '為': '为', '麼': '么', '們': '们', '煩': '烦', '這': '这',
+    '為': '为', '麼': '么', '們': '们', '煩': '烦', '這': '这', '創': '创',
 })
 
 ALIASES = {
-    "出拳": "rock_push", "向前出拳": "rock_push",
+    "出拳": "rock_push", "向前出拳": "rock_push", "打死": "rock_push",
+    "一拳打死": "rock_push",
     "画八字": "paper_figure8", "画8字": "paper_figure8",
     "画爱心": "heart_draw", "画心": "heart_draw",
     "画圆": "paper_circle", "画个圆": "paper_circle",
@@ -31,10 +32,13 @@ def natural_command(text):
     text = text.replace('能不能', '可以')
     if any(word in text for word in BLOCKED):
         return None
+    # Allow extra wording around the punch keyword, including an object after it.
+    if '打死' in text and '什么是' not in text:
+        return 'rock_push'
     text = PREFIX.sub('', text)
     text = SUFFIX.sub('', text)
     patterns = {
-        'rock_push': r'(?:出(?:个|一)?拳|打(?:个|一)?拳|向前出拳|挥(?:个|一)?拳)',
+        'rock_push': r'(?:出(?:个|一)?拳|打(?:个|一)?拳|向前出拳|挥(?:个|一)?拳|(?:一拳)?打死)',
         'paper_figure8': r'(?:画|划)(?:一个|个)?(?:八|8)(?:字|字符)?',
         'heart_draw': r'(?:画|划)(?:一个|个)?(?:爱心|心形|心|爱星)',
         'paper_circle': r'(?:画|划)(?:一个|个)?(?:圆|圆圈|圆形|圈|园)',
@@ -50,7 +54,7 @@ def normalize(text):
 
 
 def parse_command(text, wake_word="", fuzzy=True):
-    """Match one complete command with an optional configured wake prefix."""
+    """Match commands or fuzzy punch keywords with an optional wake prefix."""
     text, wake = normalize(text), normalize(wake_word)
     if wake:
         if not text.startswith(wake):

@@ -8,7 +8,7 @@ trajectory_player_node 只做逐帧回放，不在线解 IK。
 
 三条轨迹均以「悬空鸡脖子」home 姿态为首尾锚点（TCP = 前方0.284m/高0.459m）：
 
-  rock_push    ✊ 出拳：TCP 沿基座 X 轴前后平移，±6cm，快出慢收 ×3
+  rock_push    ✊ 出拳：TCP 在前方30~50cm、高20cm处，约0.55秒快出慢收 ×3
   paper_circle ✋ 画圆（旧版小动作，保留在轨迹库中）
   paper_figure8 ✋ 大8字：TCP 在 Y-Z 竖直面画大号双纽线（26x14cm）×2，
                全身关节参与 + j6 手腕扭转
@@ -21,7 +21,7 @@ trajectory_player_node 只做逐帧回放，不在线解 IK。
 每帧校验（任一不达标即报错退出、不写文件，与 precompute_dance 一致）：
   1. FK 位置误差 < 2mm
   2. 相邻帧线性插值中点的 FK 漂移 < 2mm
-  3. 关节限位余量 > 0.05rad，相邻帧关节速度 < 0.95 rad/s
+  3. 关节限位余量 > 0.05rad；按DM SDK各关节速度配置5/5/5/3/3/3 rad/s校验
 
 用法：
   python3 src/rebotarm_gesture_actions/rebotarm_gesture_actions/precompute_gesture_tracks.py
@@ -55,7 +55,7 @@ OUT_YAML = Path(__file__).resolve().parents[1] / "config" / "gesture_tracks.yaml
 RATE_HZ = 30.0                 # 轨迹采样率（与播放器节点节拍一致）
 MAX_POS_ERR = 0.002            # TCP 位置误差上限 2mm
 LIMIT_MARGIN = 0.05            # 关节限位最小余量（rad）
-MAX_JOINT_SPEED = 0.95         # 相邻帧关节速度上限（驱动限 1.0，留余量）
+MAX_JOINT_SPEED = np.array([5.0, 5.0, 5.0, 3.0, 3.0, 3.0])  # DM SDK配置值
 
 HOME_Q = np.array([0.0, -0.62, -0.85, 0.0, 0.0, 0.0])   # 悬空鸡脖子
 JOINT_LIMITS_LO = np.array([-2.8, -3.14, -3.14, -1.87, -1.57, -3.14])
@@ -63,12 +63,15 @@ JOINT_LIMITS_HI = np.array([2.8, 0.0, 0.0, 1.57, 1.57, 3.14])
 
 # ---- 编舞参数 ---------------------------------------------------------------
 ROCK_PUSH = {
-    "amplitude": 0.06,   # 出拳幅度 ±6cm（沿基座 X 轴）
-    "retract_in": 0.8,   # home -> 后拉点
-    "punch": 0.85,       # 后拉点 -> 前伸点（快出，像出拳）
-    "retract": 1.0,     # 前伸点 -> 后拉点（慢收）
+    "amplitude": 0.2,  # 围绕 center_x 前后各10cm，总行程20cm
+    "center_x": 0.4,   # 出拳中心距基座前方40cm
+    "height": 0.4,    # 出拳高度20cm
+    "retract_in": 1.5 / 1.1,   # home -> 后拉点，提速约10%
+    "punch": 0.6 / 1.1,        # 后拉点 -> 前伸点
+    "retract": 1.5 / 1.1,     # 慢收
+    "punch_ramp": 0.14,  # 加/减速各占出拳时间的比例，端点速度为零
     "times": 3,
-    "return_home": 0.6,  # 后拉点 -> home
+    "return_home": 1.5 / 1.1,  # 原路归位
     "max_iter": 2000,
     "tol": 1e-7,
 }
@@ -76,8 +79,8 @@ ROCK_PUSH = {
 PAPER_CIRCLE = {
     "radius": 0.05,      # 直径 10cm
     "laps": 2,
-    "lap_period": 2.5,   # 每圈时长
-    "lead": 1.0,         # home -> 圆上起点 / 起点 -> home
+    "lap_period": 2.5 / 1.1,   # 每圈时长
+    "lead": 1.0 / 1.1,         # home -> 圆上起点 / 起点 -> home
     "max_iter": 2000,
     "tol": 1e-7,
 }
@@ -88,7 +91,7 @@ PAPER_FIGURE8 = {
     # 另叠加 j6 手腕缓慢扭转（不影响 TCP 位置），展示张开的手掌
     "amp_y": 0.13,       # 横向半幅 13cm（总宽 26cm）
     "amp_z": 0.14,       # 竖直参数（8 字总高 = amp_z = 14cm）
-    "period": 4.0,       # 一个 8 字时长
+    "period": 2.0 / 1.1,       # 一个 8 字时长
     "laps": 2,
     "wrist_amp": 0.5,    # j6 扭转幅值（rad）
     "max_iter": 2000,
@@ -97,9 +100,9 @@ PAPER_FIGURE8 = {
 
 HEART_DRAW = {
     "height": 0.22,      # 爱心高度 22cm（宽度随曲线纵横比，约 24.5cm）
-    "half_period": 2.5,  # 每个半心时长（右半、左半各画一遍，都从上到下）
-    "return_top": 1.2,   # 底部心尖 -> 顶部凹陷 的抬笔回程
-    "lead": 1.2,         # home -> 顶部凹陷 / 底部心尖 -> home
+    "half_period": 2.5 / 1.1,  # 每个半心时长
+    "return_top": 1.2 / 1.1,   # 抬笔回程
+    "lead": 1.2 / 1.1,         # 进出场
     "max_iter": 2000,
     "tol": 1e-7,
 }
@@ -154,10 +157,21 @@ def solve_path(model, data, fid, positions, max_iter, tol):
     return frames
 
 
-def seg_ease(p0, p1, duration):
+def seg_ease(p0, p1, duration, easing=ease):
     """余弦缓动直线段（含终点、不含起点，便于拼接）。"""
     n = max(2, int(round(duration * RATE_HZ)))
-    return [p0 + (p1 - p0) * ease((k + 1) / n) for k in range(n)]
+    return [p0 + (p1 - p0) * easing((k + 1) / n) for k in range(n)]
+
+
+def punch_ease(u):
+    """余弦速度坡道 + 匀速前冲；位置、速度、加速度连续。"""
+    ramp = ROCK_PUSH["punch_ramp"]
+    scale = 1.0 / (1.0 - ramp)
+    if u < ramp:
+        return scale * 0.5 * (u - ramp / math.pi * math.sin(math.pi * u / ramp))
+    if u > 1.0 - ramp:
+        return 1.0 - punch_ease(1.0 - u)
+    return scale * (u - 0.5 * ramp)
 
 
 # =============================================================================
@@ -166,16 +180,49 @@ def seg_ease(p0, p1, duration):
 
 def rock_push_targets(tcp):
     p = ROCK_PUSH
-    x0, y0, z0 = tcp
+    x0, y0, z0 = p["center_x"], tcp[1], p["height"]
     back = np.array([x0 - p["amplitude"], y0, z0])
     front = np.array([x0 + p["amplitude"], y0, z0])
     home = tcp.copy()
     pts = seg_ease(home, back, p["retract_in"])
     for _ in range(p["times"]):
-        pts += seg_ease(back, front, p["punch"])    # 快出
+        pts += seg_ease(back, front, p["punch"], punch_ease)  # 快出
         pts += seg_ease(front, back, p["retract"])  # 慢收
     pts += seg_ease(back, home, p["return_home"])
     return pts
+
+
+def solve_rock_push(model, data, fid, tcp):
+    """只解一次蓄势和前冲；回收沿原关节路径反向回放，消除冗余IK漂移。"""
+    p = ROCK_PUSH
+    targets = rock_push_targets(tcp)
+    n_lead = max(2, round(p["retract_in"] * RATE_HZ))
+    n_punch = max(2, round(p["punch"] * RATE_HZ))
+    seed_targets = [tcp.copy()] + targets[:n_lead + n_punch]
+    seed_frames = solve_path(model, data, fid, seed_targets, p["max_iter"], p["tol"])
+    seed_frames[0] = HOME_Q.copy()
+    lead_q = seed_frames[:n_lead + 1]
+    lead_p = seed_targets[:n_lead + 1]
+    punch_q = seed_frames[n_lead:]
+    punch_p = seed_targets[n_lead:]
+    frames, positions = list(lead_q), list(lead_p)
+
+    def reverse_segment(qs, ps, duration):
+        n = max(2, round(duration * RATE_HZ))
+        # 反向匀速穿过原采样时间；原轨迹端点已缓动至零速度。
+        for k in range(1, n + 1):
+            index = (len(qs) - 1) * (1.0 - k / n)
+            i = min(int(index), len(qs) - 2)
+            u = index - i
+            frames.append((1-u) * qs[i] + u * qs[i+1])
+            positions.append((1-u) * ps[i] + u * ps[i+1])
+
+    for _ in range(p["times"]):
+        frames.extend(punch_q[1:])
+        positions.extend(punch_p[1:])
+        reverse_segment(punch_q, punch_p, p["retract"])
+    reverse_segment(lead_q, lead_p, p["return_home"])
+    return frames, positions
 
 
 def paper_circle_targets(tcp):
@@ -257,7 +304,7 @@ def heart_draw_targets(tcp):
 # 校验（与 precompute_dance 相同的四项）
 # =============================================================================
 
-def verify_track(name, frames, targets, model, data, fid):
+def verify_track(name, frames, targets, model, data, fid, max_speed=MAX_JOINT_SPEED):
     arr = np.asarray(frames)
     worst_pos = worst_mid = 0.0
     for i, q6 in enumerate(arr):
@@ -270,7 +317,8 @@ def verify_track(name, frames, targets, model, data, fid):
             worst_mid = max(worst_mid, float(np.linalg.norm(p_mid - t_mid)))
     loop_gap = float(np.linalg.norm(arr[0] - arr[-1]))
     margin = np.minimum(arr - JOINT_LIMITS_LO, JOINT_LIMITS_HI - arr).min()
-    max_vel = float(np.abs(np.diff(arr, axis=0)).max() * RATE_HZ)
+    joint_speeds = np.abs(np.diff(arr, axis=0)).max(axis=0) * RATE_HZ
+    max_vel = float(joint_speeds.max())
 
     print(f"  [{name}] 帧数={len(arr)} 时长={len(arr)/RATE_HZ:.1f}s")
     print(f"    FK 位置误差 max      = {worst_pos*1000:.3f} mm")
@@ -280,7 +328,7 @@ def verify_track(name, frames, targets, model, data, fid):
     print(f"    关节速度 max         = {max_vel:.3f} rad/s")
 
     ok = (worst_pos < MAX_POS_ERR and worst_mid < MAX_POS_ERR
-          and margin > LIMIT_MARGIN and max_vel < MAX_JOINT_SPEED)
+          and margin > LIMIT_MARGIN and bool(np.all(joint_speeds < max_speed)))
     if not ok:
         raise RuntimeError(f"轨迹 [{name}] 校验未通过，请调整编舞参数后重跑")
     return {"frames": len(arr), "max_pos_err_mm": round(worst_pos * 1000, 4),
@@ -300,7 +348,7 @@ def main():
     print(f"home TCP (FK): [{tcp[0]:.4f}, {tcp[1]:.4f}, {tcp[2]:.4f}] m")
 
     specs = [
-        ("rock_push", "✊ 出拳：TCP 沿基座X轴前后 ±6cm，快出慢收×3，首尾=home",
+        ("rock_push", f"✊ 出拳：半行程{ROCK_PUSH['amplitude']*100:g}cm，中心X={ROCK_PUSH['center_x']:g}m、高{ROCK_PUSH['height']:g}m，前冲{ROCK_PUSH['punch']:.3f}秒×{ROCK_PUSH['times']}，沿原路回home",
          rock_push_targets, ROCK_PUSH),
         ("paper_circle", "✋ 画圆：TCP 在 Y-Z 竖直面画直径10cm圆×2圈，首尾=home",
          paper_circle_targets, PAPER_CIRCLE),
@@ -318,15 +366,23 @@ def main():
             targets, j6_wave = paper_figure8_targets(tcp)
         else:
             targets = gen(tcp)
-        frames = solve_path(model, data, fid, targets,
-                            cfg["max_iter"], cfg["tol"])
+        if name == "rock_push":
+            frames, targets = solve_rock_push(model, data, fid, tcp)
+        else:
+            frames = solve_path(model, data, fid, targets,
+                                cfg["max_iter"], cfg["tol"])
         if j6_wave is not None:
             # 叠加 j6 手腕扭转（j6 绕自身轴旋转，不改变 end_link 位置，
             # FK 校验会确认这一点）；首尾归零
             frames = [np.array([*q[:5], w]) for q, w in zip(frames, j6_wave)]
             frames[0] = np.array([*frames[0][:5], 0.0])
             frames[-1] = np.array([*frames[-1][:5], 0.0])
-        report = verify_track(name, frames, targets, model, data, fid)
+        report = verify_track(name, frames, targets, model, data, fid,
+                              cfg.get("max_joint_speed", MAX_JOINT_SPEED))
+        if name == "rock_push" and not (
+                np.allclose(frames[0], HOME_Q, atol=1e-8)
+                and np.allclose(frames[-1], HOME_Q, atol=1e-8)):
+            raise RuntimeError("出拳首尾关节姿态未恢复到HOME")
         tracks[name] = {
             "description": desc,
             "report": report,

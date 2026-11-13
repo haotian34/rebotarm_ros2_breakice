@@ -58,6 +58,7 @@ class RvizSubtitlesNode(Node):
         if not math.isfinite(self.timeout) or self.timeout <= 0:
             raise ValueError('subtitle_timeout must be finite and positive')
         self.visible_until = 0.0
+        self.cleared = False
         self.text, self.status = '', ''
         self.publisher = self.create_publisher(OverlayText, f'/{ns}/voice/subtitles', 1)
         self.create_subscription(String, f'/{ns}/voice/transcript', self._text, 10)
@@ -83,11 +84,18 @@ class RvizSubtitlesNode(Node):
             self._clear()
             return
         self.publisher.publish(make_overlay(self.text, self.status, self.width, self.text_size))
+        self.cleared = False
 
     def _clear(self):
-        msg = OverlayText()
+        if self.cleared:
+            return
+        # This RViz plugin also consumes layout fields on DELETE. Preserve
+        # dimensions/alignment so hiding text cannot reset the overlay to0x0.
+        msg = make_overlay('', '', self.width, self.text_size)
         msg.action = OverlayText.DELETE
+        msg.text = ''
         self.publisher.publish(msg)
+        self.cleared = True
 
     def destroy_node(self):
         if rclpy.ok():

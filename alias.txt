@@ -1,12 +1,271 @@
-alias loadros='source /opt/ros/jazzy/setup.bash'
-alias loadarm='source ~/rebotarm_ros2/install/setup.bash'
+# Bash: source this file from the project root with: source ./alias.txt
+# Resolve the workspace from this file, independently of the caller's directory.
+REBOTARM_WORKSPACE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+
+unalias loadros loadarm buildarm startreal setupserial startvision startvison startfollow startgesture startvoice listenvoice playaction punch figure8 heart circle 2>/dev/null || true
+
+loadros() {
+    local distro="${REBOTARM_ROS_DISTRO:-${ROS_DISTRO:-}}"
+    if [[ -z "$distro" ]]; then
+        if [[ -f /opt/ros/jazzy/setup.bash ]]; then
+            distro=jazzy
+        elif [[ -f /opt/ros/humble/setup.bash ]]; then
+            distro=humble
+        else
+            printf '%s\n' 'Set REBOTARM_ROS_DISTRO to your installed ROS 2 distribution.' >&2
+            return 1
+        fi
+    fi
+    local setup="/opt/ros/$distro/setup.bash"
+    if [[ ! -f "$setup" ]]; then
+        printf 'ROS 2 setup file not found: %s\n' "$setup" >&2
+        return 1
+    fi
+    source "$setup"
+}
+
+loadarm() {
+    local setup="$REBOTARM_WORKSPACE/install/setup.bash"
+    local aliases="$REBOTARM_WORKSPACE/alias.txt"
+    if [[ ! -f "$setup" ]]; then
+        printf 'Workspace setup file not found: %s; build the project first.\n' "$setup" >&2
+        return 1
+    fi
+    source "$setup" || return
+    source "$aliases"
+}
+
+# Build in a subshell so Conda and a previously loaded workspace cannot
+# contaminate dependency discovery. The caller's environment stays intact.
+buildarm() (
+    cd -- "$REBOTARM_WORKSPACE" || return
+    local ignored_prefixes="${CONDA_PREFIX:-}"
+    if [[ -n "${CONDA_EXE:-}" ]]; then
+        local conda_root
+        conda_root="$(dirname -- "$(dirname -- "$CONDA_EXE")")"
+        ignored_prefixes="${ignored_prefixes:+$ignored_prefixes;}$conda_root"
+    fi
+    export PATH=/usr/bin:/bin
+    unset AMENT_PREFIX_PATH COLCON_PREFIX_PATH CMAKE_PREFIX_PATH PYTHONPATH
+    unset LD_LIBRARY_PATH LIBRARY_PATH CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH
+    unset PKG_CONFIG_PATH QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH
+    loadros || return
+    local -a cmake_options=(--cmake-clean-cache --cmake-args
+        -DCMAKE_DISABLE_FIND_PACKAGE_Qt6=TRUE
+        -DPython3_EXECUTABLE=/usr/bin/python3
+        -DPYTHON_EXECUTABLE=/usr/bin/python3)
+    if [[ -n "$ignored_prefixes" ]]; then
+        cmake_options+=("-DCMAKE_IGNORE_PREFIX_PATH=$ignored_prefixes")
+    fi
+    command colcon build --symlink-install "$@" "${cmake_options[@]}"
+)
+
+# One-time USB serial access setup on each Linux computer.
+setupserial() {
+    bash "$REBOTARM_WORKSPACE/scripts/setup_serial.sh" "$@"
+}
+
+# Real hardware; an unconfigured DM channel uses a unique USB serial device.
+# Override with: startreal model:=dm channel:=/dev/ttyACM0
+startreal() (
+    # Snap editor terminals can inject libraries incompatible with system ROS.
+    # Filter only Snap paths, preserving other entries and the parent shell.
+    local variable entry filtered
+    local -a entries
+    for variable in LD_LIBRARY_PATH GTK_PATH GIO_MODULE_DIR GIO_EXTRA_MODULES QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH; do
+        [[ -v "$variable" ]] || continue
+        filtered=""
+        IFS=: read -r -a entries <<< "${!variable}"
+        for entry in "${entries[@]}"; do
+            case "$entry" in
+                /snap/*|/var/lib/snapd/snap/*) continue ;;
+            esac
+            [[ -n "$entry" ]] && filtered="${filtered:+$filtered:}$entry"
+        done
+        if [[ -n "$filtered" ]]; then
+            export "$variable=$filtered"
+        else
+            unset "$variable"
+        fi
+    done
+    loadros || return
+    loadarm || return
+    local channel
+    channel="$(/usr/bin/python3 "$REBOTARM_WORKSPACE/scripts/select_hardware_channel.py" \
+        "$REBOTARM_WORKSPACE/src/rebotarm_bringup/config/rebotarm_hardware.yaml" "$@")" || return
+    printf 'Hardware channel: %s\n' "$channel"
+    if [[ "$channel" == /dev/* ]]; then
+        if [[ ! -e "$channel" ]]; then
+            printf 'Serial device not found: %s\nCheck /dev/serial/by-id/ or pass channel:=<device>.\n' "$channel" >&2
+            return 1
+        fi
+        if [[ ! -r "$channel" || ! -w "$channel" ]]; then
+            # Group membership may have been configured after desktop login.
+            # sg refreshes it for this launch without changing account rights.
+            local device_group user_name group_command
+            device_group="$(stat -Lc %G -- "$channel")" || return
+            user_name="$(id -un)" || return
+            if command -v sg >/dev/null &&
+                id -nG "$user_name" | tr ' ' '\n' | grep -Fxq "$device_group" &&
+                ! id -nG | tr ' ' '\n' | grep -Fxq "$device_group"; then
+                printf 'Refreshing configured serial group for this launch: %s\n' "$device_group"
+                printf -v group_command '%q ' bash -c \
+                    'source "$1/alias.txt" || exit; shift; startreal "$@"' \
+                    bash "$REBOTARM_WORKSPACE" "channel:=$channel" "$@"
+                sg "$device_group" -c "$group_command"
+                return $?
+            fi
+            printf 'Serial access denied: %s\nRun setupserial with this device path, then log out and log back in.\n' "$channel" >&2
+            return 1
+        fi
+    fi
+    ros2 launch rebotarm_bringup bringup.launch.py use_rviz:=true "$@" "channel:=$channel"
+)
+
 alias startsimulation='ros2 launch rebotarm_bringup fake_dm_bringup.launch.py use_rviz:=true'
-alias startvision='ros2 launch rebotarm_vision vision.launch.py'
-alias startgesture='ros2 launch rebotarm_gesture_actions gesture_actions.launch.py'
+startvision() (
+    loadros || return
+    loadarm || return
+    local mode="${REBOTARM_VISION_MODE:-auto}" arg nodes real=0 simulated=0 device
+    local -a options=()
+    for arg in "$@"; do
+        case "$arg" in
+            mode:=*) mode="${arg#mode:=}" ;;
+            camera_device:=*|camera_index:=*)
+                options+=("$arg")
+                # An explicit device/index needs no driver discovery.
+                [[ "$mode" == auto ]] && mode=manual
+                ;;
+            *) options+=("$arg") ;;
+        esac
+    done
+    if [[ "$mode" == auto ]]; then
+        nodes="$(ros2 node list)" || return
+        while IFS= read -r arg; do
+            case "$arg" in
+                */reBotArmController) real=1 ;;
+                */fake_rebotarm_dm_driver|*/fake_rebotarm_rs_driver) simulated=1 ;;
+            esac
+        done <<< "$nodes"
+        if (( real && simulated )); then
+            printf '%s\n' 'Both real and fake drivers found; specify startvision mode:=real or mode:=sim.' >&2
+            return 1
+        fi
+        mode=sim
+        (( real )) && mode=real
+    fi
+    case "$mode" in
+        real) device="${REBOTARM_REAL_CAMERA:-}" ;;
+        sim) device="${REBOTARM_SIM_CAMERA:-}" ;;
+        manual) device="" ;;
+        *) printf 'Unknown vision mode: %s (use auto, real or sim)\n' "$mode" >&2; return 1 ;;
+    esac
+    printf 'Vision camera mode: %s\n' "$mode"
+    local -a defaults=("camera_mode:=$mode")
+    [[ -n "$device" ]] && defaults+=("camera_device:=$device")
+    ros2 launch rebotarm_vision vision.launch.py "${defaults[@]}" "${options[@]}"
+)
+# Accept the common spelling typo too.
+startvison() { startvision "$@"; }
+
+# Hand-follow starts with an automatic move to home; stop other action nodes first.
+# Default: arm RealSense RGB camera. Override: startfollow camera_device:=<path>
+# To use a numeric camera index: startfollow camera_mode:=manual camera_index:=1
+startfollow() (
+    loadros || return
+    loadarm || return
+    local device
+    device="$(/usr/bin/python3 -c 'from rebotarm_vision.camera_selection import select_camera; print(select_camera("real"))')" || return
+    printf 'Hand-follow camera: %s\n' "$device"
+    local -a camera_options=(camera_mode:=real "camera_device:=$device")
+    ros2 launch rebotarm_vision palm_follow.launch.py "${camera_options[@]}" "$@"
+)
+
+startgesture() (
+    loadros || return
+    loadarm || return
+    local nodes start_player=true
+    nodes="$(ros2 node list)" || return
+    if grep -qx '/rebotarm_gesture_dispatcher' <<< "$nodes"; then
+        printf '%s\n' 'Gesture actions are already running.'
+        return 0
+    fi
+    if grep -qx '/rebotarm_trajectory_player' <<< "$nodes"; then
+        start_player=false
+    fi
+    ros2 launch rebotarm_gesture_actions gesture_actions.launch.py "start_player:=$start_player" "$@"
+)
+
+startvoice() (
+    loadros || return
+    loadarm || return
+    local nodes start_player=true show_subtitles=true arg
+    nodes="$(ros2 node list)" || return
+    if grep -qx '/rebotarm_voice' <<< "$nodes"; then
+        printf '%s\n' 'Voice is already running. Use listenvoice in another terminal; stop the old startvoice before restarting.'
+        return 0
+    fi
+    if grep -qx '/rebotarm_trajectory_player' <<< "$nodes"; then
+        start_player=false
+    fi
+    if grep -qx '/rebotarm_voice_subtitles' <<< "$nodes"; then
+        show_subtitles=false
+    fi
+    # Explicit caller choice takes precedence over automatic discovery.
+    for arg in "$@"; do
+        case "$arg" in start_player:=*) start_player="${arg#start_player:=}" ;; esac
+    done
+    printf '%s\n' 'Wait for READY, then run listenvoice in another terminal. There is no startup deadline.'
+    ros2 launch rebotarm_voice voice_control.launch.py "start_player:=$start_player" "show_subtitles:=$show_subtitles" "$@"
+)
+
+listenvoice() (
+    loadros || return
+    loadarm || return
+    ros2 service call /rebotarm/voice/listen std_srvs/srv/Trigger "{}"
+)
+
+# Start only the trajectory player if voice/gesture control has not started it.
+# The real or simulated arm driver must already be running.
+playaction() (
+    local track="${1:-}" nodes player_pid attempt ready=0
+    case "$track" in
+        rock_push|paper_figure8|heart_draw|paper_circle) ;;
+        *) printf '%s\n' 'Usage: playaction {rock_push|paper_figure8|heart_draw|paper_circle}' >&2; return 1 ;;
+    esac
+    loadros || return
+    loadarm || return
+    nodes="$(ros2 node list)" || return
+    if ! grep -qx '/rebotarm_trajectory_player' <<< "$nodes"; then
+        ros2 run rebotarm_gesture_actions trajectory_player_node \
+            > /tmp/rebotarm_action_player.log 2>&1 &
+        player_pid=$!
+        for ((attempt=0; attempt<20; attempt++)); do
+            kill -0 "$player_pid" 2>/dev/null || break
+            nodes="$(ros2 node list)" || break
+            if grep -qx '/rebotarm_trajectory_player' <<< "$nodes"; then
+                ready=1
+                break
+            fi
+            sleep 0.5
+        done
+        if (( ! ready )); then
+            printf '%s\n' 'Action player did not become ready; check /tmp/rebotarm_action_player.log' >&2
+            return 1
+        fi
+    fi
+    ros2 topic pub --once /rebotarm/action/play std_msgs/msg/String "{data: $track}"
+)
+
+# Direct actions: 出拳 / 画八字 / 画爱心 / 画圆.
+punch()   { playaction rock_push; }
+figure8() { playaction paper_figure8; }
+heart()   { playaction heart_draw; }
+circle()  { playaction paper_circle; }
 
 dance() {
-    source /opt/ros/jazzy/setup.bash
-    source "$HOME/rebotarm_ros2/install/setup.bash"
+    loadros || return
+    loadarm || return
 
     if ! ros2 node list 2>/dev/null | grep -qx '/rebotarm_dance'; then
         ros2 launch rebotarm_dance dance.launch.py &
@@ -15,4 +274,3 @@ dance() {
     ros2 topic pub --once /rebotarm/dance/start \
         std_msgs/msg/Bool "{data: true}"
 }
-

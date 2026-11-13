@@ -4,6 +4,7 @@ import sys
 import numpy as np
 import pytest
 from rebotarm_voice.audio import LocalRecognizer
+from rebotarm_voice.audio import record_until_silence
 
 
 def test_local_load_and_transcription(monkeypatch):
@@ -59,3 +60,59 @@ def test_reject_whole_low_confidence_utterance(monkeypatch, logprob, no_speech):
     result = recognizer.record_and_transcribe(1, 16000, None, .01, 'zh')
     assert result == '不要画圆'
     assert result.rejection_reason.startswith('low confidence:')
+
+
+def fake_stream(levels, overflow=False):
+    class Stream:
+        reads = 0
+        closed = False
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            self.closed = True
+        def read(self, frames):
+            level = levels[min(self.reads, len(levels) - 1)]
+            self.reads += 1
+            return np.full((frames, 1), level, dtype=np.int16), overflow
+    stream = Stream()
+    return stream, SimpleNamespace(InputStream=MagicMock(return_value=stream))
+
+
+def test_endpoint_waits_for_speech_then_stops_after_silence():
+    stream, sd = fake_stream([0]*20 + [1000]*4 + [0]*8)
+    result = record_until_silence(sd, 8., 16000, None, .01, .8, .25)
+    assert result.shape == (int(3.2*16000), 1)
+    assert stream.closed
+
+
+def test_endpoint_does_not_cut_a_short_pause_between_words():
+    stream, sd = fake_stream([1000]*4 + [0]*4 + [1000]*4 + [0]*8)
+    result = record_until_silence(sd, 8., 16000, None, .01, .8, .25)
+    assert result.shape == (2*16000, 1)
+
+
+@pytest.mark.parametrize('levels', [[0], [1000], [1000]+[0]*79])
+def test_silence_continuous_speech_or_short_noise_obeys_cap(levels):
+    stream, sd = fake_stream(levels)
+    result = record_until_silence(sd, 8., 16000, None, .01, .8, .25)
+    assert result.shape == (8*16000, 1)
+    assert stream.closed
+
+
+def test_audio_overflow_is_rejected_and_stream_closed():
+    stream, sd = fake_stream([1000], overflow=True)
+    with pytest.raises(RuntimeError, match='overflow'):
+        record_until_silence(sd, 8., 16000, None, .01, .8, .25)
+    assert stream.closed
+
+
+def test_early_endpoint_flows_into_confidence_checked_transcription(monkeypatch):
+    stream, sd = fake_stream([1000]*4 + [0]*8)
+    monkeypatch.setitem(sys.modules, 'sounddevice', sd)
+    recognizer = LocalRecognizer()
+    recognizer.model = MagicMock()
+    recognizer.model.transcribe.return_value = (iter([
+        SimpleNamespace(text='打死', avg_logprob=-.2, no_speech_prob=.1)]), None)
+    assert recognizer.record_and_transcribe(8.,16000,None,.01,'zh',silence_seconds=.8) == '打死'
+    assert len(recognizer.model.transcribe.call_args.args[0]) == int(1.2*16000)
+    assert stream.closed

@@ -170,6 +170,7 @@ class FakeRsDriver(Node):
         self._service_handles = [
             self.create_service(Trigger, f"/{self.namespace}/safety_stop", self._safety_stop),
             self.create_service(Trigger, f"/{self.namespace}/stop_and_home", self._stop_and_home),
+            self.create_service(Trigger, f"/{self.namespace}/safety_release", self._safety_release),
             self.create_service(Trigger, f"/{self.namespace}/enable", self._enable),
             self.create_service(Trigger, f"/{self.namespace}/disable", self._disable),
             self.create_service(Trigger, f"/{self.namespace}/safe_home", self._safe_home),
@@ -271,6 +272,22 @@ class FakeRsDriver(Node):
         self.targets = [0.0] * 6
         self.state_machine = "SAFETY_HOMING"
         response.message = "stopped; slow home started; safety latch active"
+        self.publish_status()
+        return response
+
+    def _safety_release(self, _request, response):
+        if not self.safety_latched or self.state_machine != "SAFETY_STOPPED" or not self.enabled:
+            response.success = False
+            response.message = "release requires enabled SAFETY_STOPPED state"
+        else:
+            self.targets = list(self.positions)
+            self.velocities = [0.0] * 6
+            self.gripper_target = self.gripper_position
+            self.gripper_velocity = 0.0
+            self.safety_latched = False
+            self.state_machine = "IDLE"
+            response.success = True
+            response.message = "safety latch released; holding current position"
         self.publish_status()
         return response
 

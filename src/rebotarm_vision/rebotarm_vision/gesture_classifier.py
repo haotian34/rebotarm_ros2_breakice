@@ -42,10 +42,9 @@ DEFAULT_PARAMS = {
     "heart_index_max": 0.8,   # 两手食指尖间距 < 0.8 * 手尺度
     "heart_wrist_min": 1.2,   # 两手腕间距 > 1.2 * 手尺度（确为分开的两只手）
     "heart_spread_min": 0.5,  # 同手拇指尖-食指尖间距 > 0.5 * 手尺度（比心是张开的）
-    "heart_index_bend_min": 45.0,  # 比心时食指 PIP 关节屈曲角（度，两段指骨夹角，
-                                   # 0=完全伸直）：比心弯曲通常 >60°，双手布全伸 <20°。
-                                   # 用角度而非指尖距离比——比心时指尖离手腕仍很远。
-                                   # 中指/无名指/小指不参与（各人比心习惯不同）
+    # 食指尖沿两手食指根的连线向内靠拢。屏幕投影中的食指可以是直的，
+    # 不再要求 PIP 弯曲角；仍排除两只平行张开的手掌。
+    "heart_index_inward_min": 0.15,
 }
 
 
@@ -91,24 +90,8 @@ def classify_single(lm, p=None):
 
 
 def is_heart(lm0, lm1, p=None):
-    """双手比心判定：两手拇指尖相碰 + 食指尖相碰 + 手腕分开 + 指端张开。"""
-    p = p or DEFAULT_PARAMS
-    s = 0.5 * (hand_scale(lm0) + hand_scale(lm1))
-    if _dist(lm0[WRIST], lm1[WRIST]) < p["heart_wrist_min"] * s:
-        return False
-    if _dist(lm0[THUMB_TIP], lm1[THUMB_TIP]) > p["heart_tip_max"] * s:
-        return False
-    if _dist(lm0[INDEX_TIP], lm1[INDEX_TIP]) > p["heart_index_max"] * s:
-        return False
-    # 同一只手的拇指尖与食指尖要张开（比心时围成弧，石头时二者贴在一起）
-    for lm in (lm0, lm1):
-        if _dist(lm[THUMB_TIP], lm[INDEX_TIP]) < p["heart_spread_min"] * s:
-            return False
-    # 食指 PIP 关节必须屈曲（比心时围成弧；双手布时食指全伸 -> 排除）
-    for lm in (lm0, lm1):
-        if bend_angle_deg(lm, INDEX_MCP, INDEX_PIP, INDEX_TIP) < p["heart_index_bend_min"]:
-            return False
-    return True
+    """Use the same geometric checks as the debug overlay."""
+    return all(row[3] for row in heart_debug(lm0, lm1, p))
 
 
 def heart_debug(lm0, lm1, p=None):
@@ -128,13 +111,17 @@ def heart_debug(lm0, lm1, p=None):
          d_index <= p["heart_index_max"]),
     ]
     for i, lm in enumerate((lm0, lm1)):
-        spread = _dist(lm[THUMB_TIP], lm[INDEX_TIP]) / hand_scale(lm)
+        spread = _dist(lm[THUMB_TIP], lm[INDEX_TIP]) / s
         rows.append((f"hand{i} spread(>)", spread, p["heart_spread_min"],
                      spread >= p["heart_spread_min"]))
-    for i, lm in enumerate((lm0, lm1)):
-        ang = bend_angle_deg(lm, INDEX_MCP, INDEX_PIP, INDEX_TIP)
-        rows.append((f"hand{i} index bend(>)", ang, p["heart_index_bend_min"],
-                     ang >= p["heart_index_bend_min"]))
+    for i, (lm, other) in enumerate(((lm0, lm1), (lm1, lm0))):
+        axis = (other[INDEX_MCP][0] - lm[INDEX_MCP][0],
+                other[INDEX_MCP][1] - lm[INDEX_MCP][1])
+        tip = (lm[INDEX_TIP][0] - lm[INDEX_MCP][0],
+               lm[INDEX_TIP][1] - lm[INDEX_MCP][1])
+        inward = (tip[0] * axis[0] + tip[1] * axis[1]) / (math.hypot(*axis) + 1e-6) / s
+        rows.append((f"hand{i} index inward(>)", inward, p["heart_index_inward_min"],
+                     inward >= p["heart_index_inward_min"]))
     return rows
 
 

@@ -26,6 +26,7 @@ from std_msgs.msg import Bool, String
 from rebotarm_msgs.msg import JointPosVelCmd
 
 JOINTS = [f"joint{i}" for i in range(1, 7)]
+JOINT_SPEED_LIMITS = dict(zip(JOINTS, [5.0, 5.0, 5.0, 3.0, 3.0, 3.0]))
 
 
 class DanceNode(Node):
@@ -35,7 +36,7 @@ class DanceNode(Node):
         self.declare_parameter("arm_namespace", "rebotarm")
         self.declare_parameter("rate_hz", 60.0)
         self.declare_parameter("auto_start", False)
-        self.declare_parameter("track_speed", 1.1)
+        self.declare_parameter("track_speed", 1.5)
         self.declare_parameter("config_path", "")
         self.declare_parameter("tracks_path", "")
 
@@ -56,7 +57,7 @@ class DanceNode(Node):
         # joint_vlim 限制关节速度
         speed_cfg = self.cfg.get("speed", {})
         self.time_scale = float(speed_cfg.get("time_scale", 1.0))
-        self.joint_vlim = float(speed_cfg.get("joint_vlim", 1.0))
+        self.joint_vlim = float(speed_cfg.get("joint_vlim", 5.0))
         # 轨迹进出斜坡（秒）：轨迹在锚点处全速冲过（循环编舞），
         # 从静止直接进入会产生速度突变和猛蹿；进出各加一个余弦斜坡
         self.track_ramp = float(speed_cfg.get("track_ramp_s", 0.8))
@@ -300,7 +301,7 @@ class DanceNode(Node):
         msg = JointPosVelCmd()
         msg.stamp = self.get_clock().now().to_msg()
         msg.pos = float(pos)
-        msg.vlim = self.joint_vlim  # 关节速度上限（rad/s）
+        msg.vlim = min(self.joint_vlim, JOINT_SPEED_LIMITS[joint])
         self.joint_pubs[joint].publish(msg)
         self.current[joint] = float(pos)
         self.commanded[joint] = float(pos)
@@ -309,7 +310,7 @@ class DanceNode(Node):
         msg = JointPosVelCmd()
         msg.stamp = self.get_clock().now().to_msg()
         msg.pos = float(pos)
-        msg.vlim = float(self.cfg["gripper"]["speed"])
+        msg.vlim = min(float(self.cfg["gripper"]["speed"]), 3.0)
         self.gripper_pub.publish(msg)
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import rclpy
+import math
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -25,6 +26,7 @@ class reBotArmController(Node):
         self.declare_parameter("model", "")
         self.declare_parameter("channel", "")
         self.declare_parameter("joint_state_rate", 100.0)
+        self.declare_parameter("pos_vel_rate", 100.0)
         self.declare_parameter("arm_namespace", "rebotarm")
         self.declare_parameter("cmd_arbitration", "reject")
         self.declare_parameter("frame_id", "base_link")
@@ -36,6 +38,9 @@ class reBotArmController(Node):
         channel = str(self.get_parameter("channel").value or "")
         self.arm_namespace = str(self.get_parameter("arm_namespace").value or "rebotarm").strip("/")
         joint_state_rate = float(self.get_parameter("joint_state_rate").value)
+        pos_vel_rate = float(self.get_parameter("pos_vel_rate").value)
+        if not math.isfinite(pos_vel_rate) or not 1 <= pos_vel_rate <= 200:
+            raise ValueError('pos_vel_rate must be in [1, 200] Hz')
         cmd_arbitration = str(self.get_parameter("cmd_arbitration").value or "reject")
         self.disable_after_safe_home = bool(
             self.get_parameter("disable_after_safe_home").value
@@ -66,6 +71,7 @@ class reBotArmController(Node):
             self.hardware,
             self.arm_namespace,
             cmd_arbitration,
+            command_rate=pos_vel_rate,
         )
 
         self.get_logger().info(

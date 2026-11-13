@@ -9,6 +9,7 @@ def node():
     instance = object.__new__(RvizSubtitlesNode)
     instance.text, instance.status = '', ''
     instance.visible_until = 0.0
+    instance.cleared = False
     instance.timeout = 8.0
     instance.width, instance.text_size = 640, 22.0
     instance.publisher = Mock()
@@ -41,3 +42,20 @@ def test_new_recording_replaces_last_transcript():
     instance._status(String(data='LISTENING'))
     assert instance.text == ''
     assert '正在录音' in instance.publisher.publish.call_args.args[0].text
+
+
+def test_clear_preserves_bottom_center_geometry_and_is_sent_only_once():
+    instance = node()
+    instance._publish()
+    msg = instance.publisher.publish.call_args.args[0]
+    assert msg.action == OverlayText.DELETE
+    assert (msg.width, msg.height) == (640, 64)
+    assert msg.horizontal_alignment == OverlayText.CENTER
+    assert msg.vertical_alignment == OverlayText.BOTTOM
+    instance._publish()
+    instance._publish()
+    assert instance.publisher.publish.call_count == 1
+    instance._status(String(data='READY'))
+    assert instance.publisher.publish.call_args.args[0].action == OverlayText.ADD
+    instance._clear()
+    assert instance.publisher.publish.call_count == 3

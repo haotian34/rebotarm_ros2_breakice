@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import threading
+import math
 
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from rebotarm_msgs.msg import (
     JointMitCmd,
@@ -10,7 +12,9 @@ from rebotarm_msgs.msg import (
 
 
 class MotorPassthrough:
-    def __init__(self, node, hardware, namespace: str, arbitration: str) -> None:
+    def __init__(self, node, hardware, namespace: str, arbitration: str, command_rate: float = 100.0) -> None:
+        if not math.isfinite(command_rate) or not 1.0 <= command_rate <= 200.0:
+            raise ValueError('pos_vel_rate must be in [1, 200] Hz')
         self._node = node
         self._hardware = hardware
         self._arbitration = arbitration
@@ -68,11 +72,14 @@ class MotorPassthrough:
         self._pv_latest_pos = {}
         self._pv_latest_vlim = {}
         self._pv_dirty = False
+        self._pv_generation = hardware._safety_generation
         self._g_latest_pos = None
         self._g_latest_vlim = None
         self._g_dirty = False
+        # A slow serial write must not start overlapping timer callbacks.
+        self._pv_timer_group = MutuallyExclusiveCallbackGroup()
         self._pv_timer = self._node.create_timer(
-            0.02, self._flush_pos_vel, callback_group=self._node.reentrant_group
+            1.0 / command_rate, self._flush_pos_vel, callback_group=self._pv_timer_group
         )
 
         for joint_name in hardware.joint_names:
@@ -117,12 +124,20 @@ class MotorPassthrough:
 
     def _make_joint_pos_vel_callback(self, joint_name: str) -> object:
         def _callback(msg) -> None:
+            generation = self._hardware._safety_generation
             if not self._can_send_lowlevel(
                 f"/joints/{joint_name}/cmd/pos_vel",
                 allow_preempt=True,
             ):
                 return
             with self._pv_lock:
+                if generation != self._hardware._safety_generation:
+                    return
+                if self._pv_generation != generation:
+                    self._pv_latest_pos.clear()
+                    self._pv_latest_vlim.clear()
+                    self._pv_dirty = self._g_dirty = False
+                self._pv_generation = generation
                 self._pv_latest_pos[joint_name] = float(msg.pos)
                 self._pv_latest_vlim[joint_name] = float(msg.vlim)
                 self._pv_dirty = True
@@ -131,12 +146,20 @@ class MotorPassthrough:
 
     def _make_gripper_pos_vel_callback(self) -> object:
         def _callback(msg) -> None:
+            generation = self._hardware._safety_generation
             if not self._can_send_lowlevel(
                 "/gripper/cmd/pos_vel",
                 allow_preempt=False,
             ):
                 return
             with self._pv_lock:
+                if generation != self._hardware._safety_generation:
+                    return
+                if self._pv_generation != generation:
+                    self._pv_latest_pos.clear()
+                    self._pv_latest_vlim.clear()
+                    self._pv_dirty = self._g_dirty = False
+                self._pv_generation = generation
                 self._g_latest_pos = float(msg.pos)
                 self._g_latest_vlim = float(msg.vlim)
                 self._g_dirty = True
@@ -145,6 +168,7 @@ class MotorPassthrough:
 
     def _flush_pos_vel(self) -> None:
         with self._pv_lock:
+            generation = self._pv_generation
             positions = dict(self._pv_latest_pos) if self._pv_dirty else None
             vlims = dict(self._pv_latest_vlim) if self._pv_dirty else None
             gripper = (
@@ -164,15 +188,21 @@ class MotorPassthrough:
             "/gripper/cmd/pos_vel(batched)", allow_preempt=False
         ):
             gripper = None
+        state_before = self._hardware.state_machine
         try:
-            if positions is not None:
-                self._hardware.send_arm_pos_vel_stream(positions, vlims)
-            if gripper is not None:
-                self._hardware.send_gripper_pos_vel_cmd(*gripper)
+            with self._hardware._cmd_lock:
+                if generation != self._hardware._safety_generation:
+                    return
+                if positions is not None:
+                    self._hardware.send_arm_pos_vel_stream(positions, vlims)
+                if gripper is not None:
+                    self._hardware.send_gripper_pos_vel_cmd(*gripper)
         except Exception as exc:
             self._node.get_logger().warn(f"pos_vel stream failed: {exc}")
         finally:
-            if positions is not None or gripper is not None:
+            # Periodic status/feedback publishers already poll hardware. Avoid
+            # a redundant status read after every high-rate target send.
+            if self._hardware.state_machine != state_before:
                 self._node.publish_arm_status()
 
     def _make_joint_callback(self, joint_name: str, label: str, command) -> object:
@@ -213,7 +243,7 @@ class MotorPassthrough:
 
     def _can_send_lowlevel(self, label: str, *, allow_preempt: bool) -> bool:
         state = self._hardware.state_machine
-        if state in ("GRAVITY_COMP", "SAFE_HOMING"):
+        if state in ("GRAVITY_COMP", "SAFE_HOMING", "SAFETY_STOPPED", "SAFETY_HOMING", "SAFETY_FAULT"):
             self._node.get_logger().warn(f"rejecting {label} in state {state}")
             return False
         if state == "TRAJ_RUNNING":

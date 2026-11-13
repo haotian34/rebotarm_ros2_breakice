@@ -4,7 +4,9 @@ rebotarm_voice:
     fuzzy_matching: true
     min_avg_logprob: -0.8
     max_no_speech_prob: 0.6
-    record_seconds: 4.0
+    record_seconds: 8.0
+    silence_seconds: 0.8
+    min_speech_seconds: 0.25
     sample_rate: 16000
     audio_device: ''
     min_rms: 0.01
