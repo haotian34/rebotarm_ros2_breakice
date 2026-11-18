@@ -1,0 +1,17 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>原生 RViz · reBot Arm Studio</title><style>html,body{height:100%;margin:0;background:#303030;font:13px system-ui;color:#dce5d1}#screen{height:100%;width:100%;overflow:hidden}#message{position:absolute;inset:0;display:grid;place-items:center;background:#30352f;text-align:center;padding:20px;box-sizing:border-box}#message[hidden]{display:none}canvas{outline:none}</style></head><body><div id="screen" aria-label="原生 RViz 远程显示"></div><div id="message" role="status">正在连接本机 RViz…</div><script type="module">
+import RFB from './vendor/novnc/core/rfb.js';
+const message=document.getElementById('message');
+let rfb;
+try{
+ const response=await fetch('/api/rviz/session',{cache:'no-store'}),session=await response.json();
+ if(session.status!=='running')throw Error(session.error||'RViz 尚未就绪，请回到工作台重新连接。');
+ const url=`${location.protocol==='https:'?'wss':'ws'}://${location.hostname}:${session.ws_port}/`;
+ rfb=new RFB(document.getElementById('screen'),url,{credentials:{password:session.password},shared:true});
+ rfb.scaleViewport=true;rfb.resizeSession=false;rfb.qualityLevel=6;rfb.compressionLevel=2;
+ rfb.addEventListener('connect',()=>{message.hidden=true;parent.postMessage({type:'rebotarm-rviz-connected',generation:session.generation},location.origin)});
+ rfb.addEventListener('credentialsrequired',()=>rfb.sendCredentials({password:session.password}));
+ rfb.addEventListener('securityfailure',()=>{message.hidden=false;message.textContent='RViz 会话认证失败，请重新连接。'});
+ rfb.addEventListener('disconnect',()=>{message.hidden=false;message.textContent='RViz 显示连接已断开，请在工作台点击重新连接。';parent.postMessage({type:'rebotarm-rviz-disconnected'},location.origin)});
+ addEventListener('pagehide',()=>rfb.disconnect());
+}catch(error){message.textContent=error.message;parent.postMessage({type:'rebotarm-rviz-error',message:error.message},location.origin)}
+</script></body></html>

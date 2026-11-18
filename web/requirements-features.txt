@@ -1,0 +1,2 @@
+# Optional MCP-only dependency; vision and following reuse the ROS environment.
+fastmcp==4.2.1

@@ -2,7 +2,7 @@
 # Resolve the workspace from this file, independently of the caller's directory.
 REBOTARM_WORKSPACE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
-unalias loadros loadarm buildarm startreal setupserial startvision startvison startfollow startgesture startvoice listenvoice playaction punch figure8 heart circle 2>/dev/null || true
+unalias loadros loadarm buildarm startreal startsimulation setupserial startvision startvison startfollow startgesture startvoice listenvoice playaction punch figure8 heart circle 2>/dev/null || true
 
 loadros() {
     local distro="${REBOTARM_ROS_DISTRO:-${ROS_DISTRO:-}}"
@@ -65,9 +65,8 @@ setupserial() {
     bash "$REBOTARM_WORKSPACE/scripts/setup_serial.sh" "$@"
 }
 
-# Real hardware; an unconfigured DM channel uses a unique USB serial device.
-# Override with: startreal model:=dm channel:=/dev/ttyACM0
-startreal() (
+# Call inside a launch subshell so the editor's parent environment stays intact.
+_rebotarm_clean_snap_environment() {
     # Snap editor terminals can inject libraries incompatible with system ROS.
     # Filter only Snap paths, preserving other entries and the parent shell.
     local variable entry filtered
@@ -88,6 +87,12 @@ startreal() (
             unset "$variable"
         fi
     done
+}
+
+# Real hardware; an unconfigured DM channel uses a unique USB serial device.
+# Override with: startreal model:=dm channel:=/dev/ttyACM0
+startreal() (
+    _rebotarm_clean_snap_environment
     loadros || return
     loadarm || return
     local channel
@@ -122,7 +127,12 @@ startreal() (
     ros2 launch rebotarm_bringup bringup.launch.py use_rviz:=true "$@" "channel:=$channel"
 )
 
-alias startsimulation='ros2 launch rebotarm_bringup fake_dm_bringup.launch.py use_rviz:=true'
+startsimulation() (
+    _rebotarm_clean_snap_environment
+    loadros || return
+    loadarm || return
+    ros2 launch rebotarm_bringup fake_dm_bringup.launch.py use_rviz:=true "$@"
+)
 startvision() (
     loadros || return
     loadarm || return

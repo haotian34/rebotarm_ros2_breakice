@@ -4,6 +4,7 @@ import rclpy
 from rclpy.duration import Duration
 from std_srvs.srv import Trigger
 from rebotarmcontroller.fake_rs_driver import FakeRsDriver
+from rebotarm_msgs.msg import JointPosVelCmd
 
 
 @pytest.fixture
@@ -32,6 +33,17 @@ def test_stop_holds_arm_and_gripper_and_rejects_commands(driver):
                      driver._start_gravity_compensation, driver._stop_gravity_compensation):
         assert not callback(None, Trigger.Response()).success
     assert driver.state_machine == 'SAFETY_STOPPED'
+
+
+def test_position_command_respects_selected_velocity_limit(driver):
+    callback = driver._joint_pos_vel_callback(0)
+    for speed in (0.1, 0.3, 0.5):
+        driver.positions[0] = 0.0
+        callback(JointPosVelCmd(pos=1.0, vlim=speed))
+        driver.last_time = driver.get_clock().now() - Duration(seconds=1)
+        driver._tick()
+        assert driver.positions[0] <= speed + 0.001
+        assert abs(driver.velocities[0]) <= speed + 1e-9
 
 
 def test_home_speed_and_second_stop(driver):

@@ -1,0 +1,6 @@
+// Lightweight URDF forward kinematics for numeric readouts, without WebGL.
+const identity=()=>[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
+const multiply=(a,b)=>Array.from({length:16},(_,i)=>{const r=Math.floor(i/4),c=i%4;let v=0;for(let k=0;k<4;k++)v+=a[r*4+k]*b[k*4+c];return v});
+function transform(xyz,rpy){const [r,p,y]=rpy,cr=Math.cos(r),sr=Math.sin(r),cp=Math.cos(p),sp=Math.sin(p),cy=Math.cos(y),sy=Math.sin(y);return[cy*cp,cy*sp*sr-sy*cr,cy*sp*cr+sy*sr,xyz[0],sy*cp,sy*sp*sr+cy*cr,sy*sp*cr-cy*sr,xyz[1],-sp,cp*sr,cp*cr,xyz[2],0,0,0,1]}
+function rotation(axis,a){let [x,y,z]=axis;const len=Math.hypot(x,y,z)||1;x/=len;y/=len;z/=len;const c=Math.cos(a),s=Math.sin(a),t=1-c;return[t*x*x+c,t*x*y-s*z,t*x*z+s*y,0,t*x*y+s*z,t*y*y+c,t*y*z-s*x,0,t*x*z-s*y,t*y*z+s*x,t*z*z+c,0,0,0,0,1]}
+export function forwardKinematics(manifest,positions){const worlds={base_link:identity()};for(const joint of manifest.joints){if(!worlds[joint.parent])continue;let local=transform(joint.xyz,joint.rpy);if(['revolute','continuous'].includes(joint.type))local=multiply(local,rotation(joint.axis,positions[joint.name]??0));worlds[joint.child]=multiply(worlds[joint.parent],local)}const m=worlds.end_link??worlds.gripper_end??worlds.link6??identity();const pitch=Math.asin(Math.max(-1,Math.min(1,-m[8])));return{x:m[3],y:m[7],z:m[11],roll:Math.atan2(m[9],m[10]),pitch,yaw:Math.atan2(m[4],m[0])}}

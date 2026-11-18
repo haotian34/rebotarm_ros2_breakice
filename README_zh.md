@@ -939,7 +939,9 @@ by-id 名称可能随适配器变化，项目不猜测或自动连接多个设�
 移动或重命名项目后，在新目录重新执行 `source ./alias.txt`。
 `loadros` 优先使用 `REBOTARM_ROS_DISTRO`，其次使用当前 `ROS_DISTRO`；两者未设置时，
 依次查找 Jazzy、Humble。可以用 `export REBOTARM_ROS_DISTRO=humble` 指定版本。
-`startsimulation`、`startvision`、`startgesture` 在加载 ROS 和项目环境后使用；
+`startsimulation` 自动加载 ROS 和项目环境，并与 `startreal` 一样在子 shell 中清理
+Snap 的库和插件路径，支持 VS Code 集成终端；更新命令后先重新 `source ./alias.txt`。
+`startvision`、`startgesture` 在加载 ROS 和项目环境后使用；
 `dance` 会自动加载环境并触发舞蹈。
 构建时推荐使用 `buildarm`：它在子 shell 中加载系统 ROS 环境，动态排除当前 Conda
 安装目录，并清理 CMake 缓存，避免已加载的项目环境和 Conda 库干扰构建；不改变当前终端环境。
@@ -1348,3 +1350,18 @@ startreal
 
 也可调用 `ros2 service call /rebotarm/safety_release std_srvs/srv/Trigger '{}'`。
 DM/RS Fake 驱动同样支持此服务。控制器状态现在每 0.5 秒发布，正常静止不会因无操作而过期。
+
+## 网页可视化控制台
+
+新增 **reBot Arm Studio**：DM 真实 URDF 三维模型、六轴与夹爪调节、动作演示、视觉交互入口、系统拓扑与运行日志。
+
+```bash
+python3 web/server.py
+# 打开 http://127.0.0.1:8088
+```
+
+无需 Node.js 或额外前端依赖。浏览器演示独立运行；加载 ROS 2 环境后可用 `/usr/bin/python3 web/server.py --ros` 接入只读实际反馈，显式加 `--allow-motion` 开放控制。完整说明及验证方法见 [web/README.md](web/README.md)。
+
+本机仿真已支持网页自动启动：配置本地入口后，直接打开 `http://127.0.0.1:8088` 或双击“reBot Arm 仿真工作台”，无需日常命令行操作。网页支持停止和重启仿真，详见 [自动启动说明](web/README.md)。
+
+“视觉与交互”页现可直接启停手势动作、手掌跟随、本地语音和文字/MCP，原生 RViz 与摄像头识别画面并排显示。日常使用只需点击功能并授权浏览器摄像头、麦克风，动作沿用原项目节点和轨迹。

@@ -38,8 +38,12 @@ _GRIPPER_VISUAL_HALF_OPEN_M = 0.045
 class FakeRsDriver(Node):
     """RS ROS interface simulator with no hardware or MuJoCo dependency."""
 
-    def __init__(self) -> None:
-        super().__init__("fake_rebotarm_rs_driver")
+    def __init__(self, *, context=None, parameter_overrides=None) -> None:
+        super().__init__(
+            "fake_rebotarm_rs_driver",
+            context=context,
+            parameter_overrides=parameter_overrides,
+        )
 
         self.declare_parameter("arm_namespace", "rebotarm_rs")
         self.declare_parameter("joint_state_rate", 100.0)
@@ -69,6 +73,7 @@ class FakeRsDriver(Node):
         self.max_joint_speed = max(
             0.01, float(self.get_parameter("max_joint_speed").value)
         )
+        self.joint_velocity_limits = [self.max_joint_speed] * 6
         self.max_gripper_speed = max(
             0.01, float(self.get_parameter("max_gripper_speed").value)
         )
@@ -217,6 +222,9 @@ class FakeRsDriver(Node):
 
     def _joint_pos_vel_callback(self, index: int):
         def callback(msg: JointPosVelCmd) -> None:
+            if (not self.safety_latched and self.enabled
+                    and math.isfinite(msg.vlim) and msg.vlim > 0):
+                self.joint_velocity_limits[index] = min(self.max_joint_speed, msg.vlim)
             self._set_joint_target(index, msg.pos)
 
         return callback
@@ -388,7 +396,7 @@ class FakeRsDriver(Node):
         for index in range(6):
             before = self.positions[index]
             self.positions[index] = self._step_towards(
-                before, self.targets[index], speed * dt
+                before, self.targets[index], min(speed, self.joint_velocity_limits[index]) * dt
             )
             self.velocities[index] = (self.positions[index] - before) / dt
             moving = moving or abs(self.targets[index] - self.positions[index]) > 0.002
